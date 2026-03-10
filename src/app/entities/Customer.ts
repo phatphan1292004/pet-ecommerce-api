@@ -6,23 +6,26 @@ export class Customer {
   @ObjectIdColumn()
   _id: ObjectId;
 
-  @Column()
+  @Column({ unique: true })
   firebaseUid: string;
 
   @Column()
-  username: string;
+  displayName: string;
 
-  @Column()
+  @Column({ unique: true })
   email: string;
+
+  @Column({ nullable: true })
+  phoneNumber: string;
+
+  @Column({ nullable: true })
+  photoURL: string;
 
   @Column({ nullable: true })
   birthDate: string;
 
   @Column({ nullable: true })
   gender: string;
-
-  @Column({ nullable: true })
-  phoneNumber: string;
 
   @CreateDateColumn()
   createdAt: Date;

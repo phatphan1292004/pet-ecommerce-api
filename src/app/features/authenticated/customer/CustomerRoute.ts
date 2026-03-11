@@ -4,11 +4,12 @@ import { CustomerService, SyncCustomerData } from './CustomerService';
 const router = Router();
 const customerService = new CustomerService();
 
-// GET /api/v1/customers
-router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
+// GET /api/v1/customers/:firebaseUid - Get customer by Firebase UID
+router.get('/customers/:firebaseUid', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customers = await customerService.getAllCustomers();
-    res.json({ data: customers });
+    const firebaseUid = req.params.firebaseUid as string;
+    const customer = await customerService.getCustomerById(firebaseUid);
+    res.json({ data: customer });
   } catch (error) {
     next(error);
   }

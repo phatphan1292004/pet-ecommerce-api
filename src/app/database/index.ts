@@ -3,13 +3,14 @@ import { DataSource } from 'typeorm';
 import { config } from '../config';
 import { logger } from '../logger';
 import { Customer } from '../entities/Customer';
+import { Category } from '../entities/Categories';
 
 export const AppDataSource = new DataSource({
   type: 'mongodb',
   url: config.mongodb.uri,
   synchronize: false,
   logging: config.env !== 'production',
-  entities: [Customer],
+  entities: [Customer, Category],
 });
 
 export const connectDatabase = async (): Promise<void> => {

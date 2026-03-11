@@ -1,6 +1,6 @@
 import { AppDataSource } from '../../../database';
 import { Customer } from '../../../entities/Customer';
-import { ConflictError } from '../../../exceptions/AppError';
+import { ConflictError, NotFoundError } from '../../../exceptions/AppError';
 
 export interface SyncCustomerData {
   firebaseUid: string;
@@ -13,8 +13,16 @@ export interface SyncCustomerData {
 export class CustomerService {
   private repo = AppDataSource.getMongoRepository(Customer);
 
-  async getAllCustomers(): Promise<Customer[]> {
-    return this.repo.find();
+  async getCustomerById(firebaseUid: string): Promise<Customer> {
+    const customer = await this.repo.findOne({
+      where: { firebaseUid: firebaseUid }
+    });
+
+    if (!customer) {
+      throw new NotFoundError('Customer not found');
+    }
+
+    return customer;
   }
 
   async syncCustomer(userData: SyncCustomerData): Promise<Customer> {

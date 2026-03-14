@@ -7,6 +7,7 @@ import { connectDatabase } from './app/database';
 // Routes
 import customerRouter from './app/features/authenticated/customer';
 import categoryRouter from './app/features/guest/category';
+import productRouter from './app/features/guest/product';
 
 const app: Application = express();
 const PORT = process.env.PORT || 3000;
@@ -18,6 +19,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/', customerRouter);
 app.use('/', categoryRouter);
+app.use('/', productRouter)
 
 // Start server
 const startServer = async (): Promise<void> => {

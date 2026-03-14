@@ -4,13 +4,14 @@ import { config } from '../config';
 import { logger } from '../logger';
 import { Customer } from '../entities/Customer';
 import { Category } from '../entities/Categories';
+import { Product } from '../entities/Product';
 
 export const AppDataSource = new DataSource({
   type: 'mongodb',
   url: config.mongodb.uri,
   synchronize: false,
   logging: config.env !== 'production',
-  entities: [Customer, Category],
+  entities: [Customer, Category, Product],
 });
 
 export const connectDatabase = async (): Promise<void> => {

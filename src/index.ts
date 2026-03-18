@@ -6,8 +6,11 @@ import { logger } from './app/logger';
 import { connectDatabase } from './app/database';
 // Routes
 import customerRouter from './app/features/authenticated/customer';
+import addressRouter from './app/features/authenticated/address';
 import categoryRouter from './app/features/guest/category';
 import productRouter from './app/features/guest/product';
+import provinceRouter from './app/features/guest/province';
+import wardRouter from './app/features/guest/ward';
 
 const app: Application = express();
 const PORT = process.env.PORT || 3000;
@@ -18,8 +21,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use('/', customerRouter);
+app.use('/', addressRouter);
 app.use('/', categoryRouter);
-app.use('/', productRouter)
+app.use('/', productRouter);
+app.use('/', provinceRouter);
+app.use('/', wardRouter);
 
 // Start server
 const startServer = async (): Promise<void> => {

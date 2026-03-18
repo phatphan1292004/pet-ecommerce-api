@@ -5,13 +5,16 @@ import { logger } from '../logger';
 import { Customer } from '../entities/Customer';
 import { Category } from '../entities/Categories';
 import { Product } from '../entities/Product';
+import { Province } from '../entities/Province';
+import { Ward } from '../entities/Ward';
+import { Address } from '../entities/Address';
 
 export const AppDataSource = new DataSource({
   type: 'mongodb',
   url: config.mongodb.uri,
   synchronize: false,
   logging: config.env !== 'production',
-  entities: [Customer, Category, Product],
+  entities: [Customer, Category, Product, Province, Ward, Address],
 });
 
 export const connectDatabase = async (): Promise<void> => {

@@ -13,7 +13,7 @@ export class Product {
   slug: string;
 
   @Column()
-  brand: string;
+  brand: ObjectId;
 
   @Column()
   subcategories: ObjectId;

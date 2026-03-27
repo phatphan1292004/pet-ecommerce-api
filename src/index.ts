@@ -7,6 +7,7 @@ import { connectDatabase } from './app/database';
 // Routes
 import customerRouter from './app/features/authenticated/customer';
 import addressRouter from './app/features/authenticated/address';
+import cartRouter from './app/features/authenticated/cart';
 import categoryRouter from './app/features/guest/category';
 import brandRouter from './app/features/guest/brand';
 import productRouter from './app/features/guest/product';
@@ -23,6 +24,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/', customerRouter);
 app.use('/', addressRouter);
+app.use('/', cartRouter);
 app.use('/', categoryRouter);
 app.use('/', brandRouter);
 app.use('/', productRouter);

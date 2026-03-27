@@ -8,13 +8,14 @@ import { Product } from '../entities/Product';
 import { Province } from '../entities/Province';
 import { Ward } from '../entities/Ward';
 import { Address } from '../entities/Address';
+import { Cart } from '../entities/Cart';
 
 export const AppDataSource = new DataSource({
   type: 'mongodb',
   url: config.mongodb.uri,
   synchronize: false,
   logging: config.env !== 'production',
-  entities: [Customer, Category, Product, Province, Ward, Address],
+  entities: [Customer, Category, Product, Province, Ward, Address, Cart],
 });
 
 export const connectDatabase = async (): Promise<void> => {

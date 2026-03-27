@@ -1,6 +1,6 @@
 import { AppDataSource } from '../../../database';
 import { Customer } from '../../../entities/Customer';
-import { ConflictError, NotFoundError } from '../../../exceptions/AppError';
+import { BadRequestError, ConflictError, NotFoundError } from '../../../exceptions/AppError';
 
 export interface SyncCustomerData {
   firebaseUid: string;
@@ -8,6 +8,14 @@ export interface SyncCustomerData {
   displayName: string;
   phone?: string;
   photoURL?: string;
+}
+
+export interface UpdateCustomerProfileData {
+  displayName?: string;
+  phoneNumber?: string;
+  photoURL?: string;
+  birthDate?: string;
+  gender?: string;
 }
 
 export class CustomerService {
@@ -45,5 +53,29 @@ export class CustomerService {
     });
     
     return this.repo.save(newCustomer);
+  }
+
+  async updateCustomerProfile(firebaseUid: string, updateData: UpdateCustomerProfileData): Promise<Customer> {
+    const existingCustomer = await this.repo.findOne({
+      where: { firebaseUid }
+    });
+
+    if (!existingCustomer) {
+      throw new NotFoundError('Customer not found');
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      throw new BadRequestError('No data provided to update');
+    }
+
+    if (updateData.photoURL !== undefined) {
+      const isValidUrl = /^https?:\/\//i.test(updateData.photoURL);
+      if (!isValidUrl) {
+        throw new BadRequestError('photoURL must be a valid http/https link');
+      }
+    }
+
+    Object.assign(existingCustomer, updateData);
+    return this.repo.save(existingCustomer);
   }
 }

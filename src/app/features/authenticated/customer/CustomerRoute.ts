@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { CustomerService, SyncCustomerData } from './CustomerService';
+import { CustomerService, SyncCustomerData, UpdateCustomerProfileData } from './CustomerService';
 
 const router = Router();
 const customerService = new CustomerService();
@@ -40,6 +40,31 @@ router.post('/customers', async (req: Request, res: Response, next: NextFunction
     res.status(200).json({
       message: 'Customer synced successfully',
       data: customer
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PATCH /api/v1/customers/:firebaseUid - Update customer profile (including avatar URL)
+router.patch('/customers/:firebaseUid', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const firebaseUid = req.params.firebaseUid as string;
+    const { displayName, phoneNumber, photoURL, birthDate, gender } = req.body;
+
+    const updateData: UpdateCustomerProfileData = {
+      ...(displayName !== undefined && { displayName }),
+      ...(phoneNumber !== undefined && { phoneNumber }),
+      ...(photoURL !== undefined && { photoURL }),
+      ...(birthDate !== undefined && { birthDate }),
+      ...(gender !== undefined && { gender }),
+    };
+
+    const customer = await customerService.updateCustomerProfile(firebaseUid, updateData);
+
+    res.status(200).json({
+      message: 'Customer profile updated successfully',
+      data: customer,
     });
   } catch (error) {
     next(error);

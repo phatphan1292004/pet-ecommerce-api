@@ -8,6 +8,7 @@ export interface CreateOrderPayload {
   customerId: string;
   cartId: string;
   status?: string;
+  paymentMethod?: string;
   arrivalName: string;
   arrivalPhone: string;
   arrivalAddress: string;
@@ -43,10 +44,12 @@ export class OrderService {
       throw new BadRequestError('cartId does not belong to customerId');
     }
 
+    console.log('Creating order with payload:', payload);
     const order = this.orderRepo.create({
       customerId: payload.customerId.trim(),
       cartId: payload.cartId.trim(),
       status: payload.status?.trim() || 'pending',
+      paymentMethod: payload.paymentMethod?.trim() || 'cash',
       arrivalName: payload.arrivalName.trim(),
       arrivalPhone: payload.arrivalPhone.trim(),
       arrivalAddress: payload.arrivalAddress.trim(),

@@ -15,6 +15,9 @@ export class Order {
   @Column({ default: 'pending' })
   status: string;
 
+  @Column({ default: 'cash' })
+  paymentMethod: string;
+
   @Column()
   arrivalName: string;
 

@@ -16,9 +16,169 @@ export interface CreateOrderPayload {
   note?: string;
 }
 
+export interface OrderWithCart {
+  order: Order;
+  cart: Cart | null;
+}
+
+export interface GetOrdersByCustomerQuery {
+  status?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface OrderListItem {
+  id: string;
+  customerId: string;
+  cartId: string;
+  status: string;
+  paymentMethod: string;
+  arrivalName: string;
+  arrivalPhone: string;
+  arrivalAddress: string;
+  arrivalTime?: Date;
+  note?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  cart: {
+    id: string;
+    status: string;
+    totalPrice: number;
+    totalDiscount: number;
+    finalPrice: number;
+    products: Cart['products'];
+    createdAt: Date;
+    updatedAt: Date;
+  } | null;
+}
+
+export interface OrderListResponse {
+  items: OrderListItem[];
+  meta: {
+    page: number;
+    limit: number;
+    totalItems: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
+}
+
 export class OrderService {
   private orderRepo = AppDataSource.getMongoRepository(Order);
   private cartRepo = AppDataSource.getMongoRepository(Cart);
+
+  async getOrdersByCustomer(
+    customerId: string,
+    query: GetOrdersByCustomerQuery = {},
+  ): Promise<OrderListResponse> {
+    const normalizedCustomerId = customerId?.trim();
+    if (!normalizedCustomerId) {
+      throw new BadRequestError('customerId is required');
+    }
+
+    const normalizedStatus = query.status?.trim();
+    const where: Record<string, string> = {
+      customerId: normalizedCustomerId,
+    };
+
+    if (normalizedStatus) {
+      where.status = normalizedStatus;
+    }
+
+    const page = Number.isInteger(query.page) && (query.page as number) > 0 ? (query.page as number) : 1;
+    const limitRaw = Number.isInteger(query.limit) && (query.limit as number) > 0 ? (query.limit as number) : 10;
+    const limit = Math.min(limitRaw, 50);
+
+    const orders = await this.orderRepo.find({
+      where,
+    });
+
+    if (orders.length === 0) {
+      return {
+        items: [],
+        meta: {
+          page,
+          limit,
+          totalItems: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      };
+    }
+
+    const cartObjectIds = orders
+      .map((order) => this.toObjectId(order.cartId))
+      .filter((id): id is ObjectId => id !== null);
+
+    const uniqueCartObjectIds = Array.from(
+      new Map(cartObjectIds.map((id) => [id.toHexString(), id])).values(),
+    );
+
+    const carts =
+      uniqueCartObjectIds.length > 0
+        ? await this.cartRepo.find({
+            where: {
+              _id: {
+                $in: uniqueCartObjectIds,
+              } as any,
+            },
+          })
+        : [];
+
+    const cartsById = new Map(carts.map((cart) => [cart._id.toHexString(), cart]));
+
+    const sortedOrders = orders.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const totalItems = sortedOrders.length;
+    const totalPages = Math.ceil(totalItems / limit);
+    const startIndex = (page - 1) * limit;
+    const pagedOrders = sortedOrders.slice(startIndex, startIndex + limit);
+
+    const items = pagedOrders.map((order) => {
+        const cartObjectId = this.toObjectId(order.cartId);
+        const cart = cartObjectId ? cartsById.get(cartObjectId.toHexString()) ?? null : null;
+
+        return {
+          id: order._id.toHexString(),
+          customerId: order.customerId,
+          cartId: order.cartId,
+          status: order.status,
+          paymentMethod: order.paymentMethod,
+          arrivalName: order.arrivalName,
+          arrivalPhone: order.arrivalPhone,
+          arrivalAddress: order.arrivalAddress,
+          arrivalTime: order.arrivalTime,
+          note: order.note,
+          createdAt: order.createdAt,
+          updatedAt: order.updatedAt,
+          cart: cart
+            ? {
+                id: cart._id.toHexString(),
+                status: cart.status,
+                totalPrice: cart.totalPrice,
+                totalDiscount: cart.totalDiscount,
+                finalPrice: cart.finalPrice,
+                products: cart.products,
+                createdAt: cart.createdAt,
+                updatedAt: cart.updatedAt,
+              }
+            : null,
+        };
+      });
+
+    return {
+      items,
+      meta: {
+        page,
+        limit,
+        totalItems,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
+  }
 
   async createOrder(payload: CreateOrderPayload): Promise<Order> {
     this.validatePayload(payload);
@@ -44,7 +204,6 @@ export class OrderService {
       throw new BadRequestError('cartId does not belong to customerId');
     }
 
-    console.log('Creating order with payload:', payload);
     const order = this.orderRepo.create({
       customerId: payload.customerId.trim(),
       cartId: payload.cartId.trim(),
@@ -94,5 +253,17 @@ export class OrderService {
     }
 
     return value;
+  }
+
+  private toObjectId(value?: string): ObjectId | null {
+    if (!value) {
+      return null;
+    }
+
+    try {
+      return new ObjectId(value.trim());
+    } catch {
+      return null;
+    }
   }
 }

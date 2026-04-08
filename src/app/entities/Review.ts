@@ -18,6 +18,9 @@ export class Review {
   @Column()
   level: number;
 
+  @Column({ nullable: true })
+  parentId?: ObjectId;
+
   @Column()
   comment: string;
 

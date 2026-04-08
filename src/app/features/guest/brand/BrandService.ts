@@ -1,35 +1,28 @@
-import { AppDataSource } from '@/app/database';
-import { Category, SubCategory } from '@/app/entities/Categories';
+import { AppDataSource } from '../../../database';
+import { Brand } from '../../../entities/Brand';
 
 export interface BrandResponse {
-  _id: SubCategory['_id'];
+  _id: Brand['_id'];
   name: string;
   slug: string;
   icon: string;
 }
 
 export class BrandService {
-  private repo = AppDataSource.getMongoRepository(Category);
+  private repo = AppDataSource.getMongoRepository(Brand);
 
   async getAllBrands(): Promise<BrandResponse[]> {
-    const brandCategory = await this.repo.findOne({
+    const brands = await this.repo.find({
       where: {
-        slug: 'nhan-hang',
         is_active: true
       }
     });
 
-    if (!brandCategory?.subcategories?.length) {
-      return [];
-    }
-
-    return brandCategory.subcategories
-      .filter((subcategory) => subcategory.is_active)
-      .map((subcategory) => ({
-        _id: subcategory._id,
-        name: subcategory.name,
-        slug: subcategory.slug,
-        icon: subcategory.icon
-      }));
+    return brands.map((brand) => ({
+      _id: brand._id,
+      name: brand.name,
+      slug: brand.slug,
+      icon: brand.icon
+    }));
   }
 }

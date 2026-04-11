@@ -2,6 +2,7 @@ import { AppDataSource } from '@/app/database';
 import { Address } from '@/app/entities/Address';
 import { Customer } from '@/app/entities/Customer';
 import { BadRequestError, NotFoundError } from '@/app/exceptions/AppError';
+import { ObjectId } from 'mongodb';
 
 export interface CreateAddressData {
   firebaseUid: string;
@@ -56,6 +57,48 @@ export class AddressService {
     const sortedAddresses = addresses.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 
     return sortedAddresses.map(this.toAddressResponse);
+  }
+
+  async deleteAddress(addressId: string, firebaseUid: string): Promise<void> {
+    if (!addressId || addressId.trim().length === 0) {
+      throw new BadRequestError('addressId is required');
+    }
+
+    if (!ObjectId.isValid(addressId)) {
+      throw new NotFoundError('Invalid address id');
+    }
+
+    const oid = new ObjectId(addressId.trim());
+
+    const address = await this.addressRepo.findOne({ where: { _id: oid } });
+
+    if (!address) {
+      throw new NotFoundError('Address not found');
+    }
+
+    if (address.firebaseUid !== firebaseUid) {
+      throw new BadRequestError('Not allowed to delete this address');
+    }
+
+    // If deleting a default address, promote the most recent address to default
+    const wasDefault = address.isDefault;
+
+    await this.addressRepo.deleteOne({ _id: oid });
+
+    if (wasDefault) {
+      const otherAddresses = await this.addressRepo.find({
+        where: { firebaseUid: firebaseUid },
+        order: { createdAt: 'DESC' }
+      });
+
+      const next = otherAddresses[0];
+      if (next) {
+        await this.addressRepo.updateOne(
+          { _id: next._id },
+          { $set: { isDefault: true } }
+        );
+      }
+    }
   }
 
   async createAddress(payload: CreateAddressData): Promise<Address> {

@@ -33,4 +33,24 @@ router.post('/addresses', async (req: Request, res: Response, next: NextFunction
   }
 });
 
+router.delete('/addresses/:addressId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const addressId = req.params.addressId as string;
+    const firebaseUid = (req.body?.firebaseUid || req.query?.firebaseUid) as string;
+
+    if (!firebaseUid) {
+      res.status(400).json({ success: false, message: 'firebaseUid is required' });
+    }
+
+    await addressService.deleteAddress(addressId, firebaseUid);
+
+    res.status(200).json({
+      success: true,
+      message: 'Address deleted successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

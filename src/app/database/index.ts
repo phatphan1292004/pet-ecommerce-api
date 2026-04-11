@@ -20,7 +20,7 @@ export const AppDataSource = new DataSource({
   logging: config.env !== 'production',
   entities: [Customer, Category, Product, Province, Ward, Address, Cart, Order, Review, Brand],
 });
-
+  
 export const connectDatabase = async (): Promise<void> => {
   try {
     await AppDataSource.initialize();

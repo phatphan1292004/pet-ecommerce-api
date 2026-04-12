@@ -27,6 +27,9 @@ export class Customer {
   @Column({ nullable: true })
   gender: string;
 
+  @Column({ nullable: true })
+  role?: ObjectId | string;
+
   @CreateDateColumn()
   createdAt: Date;
 

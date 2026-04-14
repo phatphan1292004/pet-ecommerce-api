@@ -1,5 +1,7 @@
 import { AppDataSource } from '@/app/database';
+import { Address } from '@/app/entities/Address';
 import { Customer } from '@/app/entities/Customer';
+import { Order } from '@/app/entities/Order';
 import { Role } from '@/app/entities/Role';
 import { BadRequestError, ConflictError, NotFoundError } from '@/app/exceptions/AppError';
 import { ObjectId } from 'mongodb';
@@ -33,6 +35,28 @@ export interface AdminUpdateUserPayload {
   roleId?: string | null;
 }
 
+export interface AdminUserAddressResponse {
+  id: string;
+  address: string;
+  province: string;
+  ward: string;
+}
+
+export interface AdminUserOrderResponse {
+  id: string;
+  customerId: string;
+  cartId: string;
+  status: string;
+  paymentMethod: string;
+  arrivalName: string;
+  arrivalPhone: string;
+  arrivalAddress: string;
+  arrivalTime: Date | null;
+  note: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface AdminUserResponse {
   id: string;
   firebaseUid: string;
@@ -47,8 +71,13 @@ export interface AdminUserResponse {
     name: string;
     description: string | null;
   } | null;
+  addresses: AdminUserAddressResponse[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface AdminUserDetailResponse extends AdminUserResponse {
+  orders: AdminUserOrderResponse[];
 }
 
 export interface AdminUserListResponse {
@@ -65,6 +94,8 @@ export interface AdminUserListResponse {
 
 export class AdminUserService {
   private customerRepo = AppDataSource.getMongoRepository(Customer);
+  private addressRepo = AppDataSource.getMongoRepository(Address);
+  private orderRepo = AppDataSource.getMongoRepository(Order);
   private roleRepo = AppDataSource.getMongoRepository(Role);
 
   async getUsers(query: AdminUserListQuery = {}): Promise<AdminUserListResponse> {
@@ -111,9 +142,9 @@ export class AdminUserService {
     };
   }
 
-  async getUserById(userId: string): Promise<AdminUserResponse> {
+  async getUserById(userId: string): Promise<AdminUserDetailResponse> {
     const user = await this.getUserEntityById(userId);
-    return this.toAdminUserResponse(user);
+    return this.toAdminUserDetailResponse(user);
   }
 
   async createUser(payload: AdminCreateUserPayload): Promise<AdminUserResponse> {
@@ -288,7 +319,15 @@ export class AdminUserService {
 
   private async toAdminUserResponse(user: Customer): Promise<AdminUserResponse> {
     const roleObjectId = this.toObjectId(user.role);
-    const role = roleObjectId ? await this.roleRepo.findOne({ where: { _id: roleObjectId } }) : null;
+    const [role, addresses] = await Promise.all([
+      roleObjectId ? this.roleRepo.findOne({ where: { _id: roleObjectId } }) : Promise.resolve(null),
+      this.addressRepo.find({ where: { firebaseUid: user.firebaseUid } }),
+    ]);
+
+    // Keep default address first, then newest addresses.
+    const sortedAddresses = addresses.sort(
+      (a, b) => Number(b.isDefault) - Number(a.isDefault) || b.createdAt.getTime() - a.createdAt.getTime(),
+    );
 
     return {
       id: user._id.toHexString(),
@@ -306,8 +345,49 @@ export class AdminUserService {
             description: role.description ?? null,
           }
         : null,
+      addresses: sortedAddresses.map((address) => this.toAdminUserAddressResponse(address)),
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
+    };
+  }
+
+  private async toAdminUserDetailResponse(user: Customer): Promise<AdminUserDetailResponse> {
+    const [baseUser, orders] = await Promise.all([
+      this.toAdminUserResponse(user),
+      this.orderRepo.find({ where: { customerId: user.firebaseUid } }),
+    ]);
+
+    const sortedOrders = orders.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    return {
+      ...baseUser,
+      orders: sortedOrders.map((order) => this.toAdminUserOrderResponse(order)),
+    };
+  }
+
+  private toAdminUserAddressResponse(address: Address): AdminUserAddressResponse {
+    return {
+      id: address._id.toHexString(),
+      address: address.address,
+      province: address.province,
+      ward: address.ward,
+    };
+  }
+
+  private toAdminUserOrderResponse(order: Order): AdminUserOrderResponse {
+    return {
+      id: order._id.toHexString(),
+      customerId: order.customerId,
+      cartId: order.cartId,
+      status: order.status,
+      paymentMethod: order.paymentMethod,
+      arrivalName: order.arrivalName,
+      arrivalPhone: order.arrivalPhone,
+      arrivalAddress: order.arrivalAddress,
+      arrivalTime: order.arrivalTime ?? null,
+      note: order.note ?? null,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
     };
   }
 

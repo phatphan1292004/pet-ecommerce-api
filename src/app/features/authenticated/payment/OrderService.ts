@@ -14,6 +14,7 @@ export interface CreateOrderPayload {
   arrivalAddress: string;
   arrivalTime?: string | Date;
   note?: string;
+  coupon?: string;
 }
 
 export interface OrderWithCart {
@@ -38,6 +39,7 @@ export interface OrderListItem {
   arrivalAddress: string;
   arrivalTime?: Date;
   note?: string;
+  couponCode?: string;
   createdAt: Date;
   updatedAt: Date;
   cart: {
@@ -67,6 +69,7 @@ export interface OrderListResponse {
 export class OrderService {
   private orderRepo = AppDataSource.getMongoRepository(Order);
   private cartRepo = AppDataSource.getMongoRepository(Cart);
+  private couponRepo = AppDataSource.getMongoRepository('Coupon');
 
   async getOrdersByCustomer(
     customerId: string,
@@ -204,6 +207,47 @@ export class OrderService {
       throw new BadRequestError('cartId does not belong to customerId');
     }
 
+    // If coupon provided, validate and update usedCount
+    if (payload.coupon && payload.coupon.trim()) {
+      const code = payload.coupon.trim().toUpperCase();
+
+      const coupon = await this.couponRepo.findOne({ where: { code } } as any);
+
+      if (!coupon) {
+        throw new BadRequestError('coupon is invalid');
+      }
+
+      const now = new Date();
+
+      if (!coupon.isActive) {
+        throw new BadRequestError('coupon is not active');
+      }
+
+      if (coupon.startDate && new Date(coupon.startDate).getTime() > now.getTime()) {
+        throw new BadRequestError('coupon is not yet valid');
+      }
+
+      if (coupon.endDate && new Date(coupon.endDate).getTime() < now.getTime()) {
+        throw new BadRequestError('coupon has expired');
+      }
+
+      if (coupon.usageLimit !== undefined && coupon.usageLimit !== null) {
+        if (coupon.usedCount >= coupon.usageLimit) {
+          throw new BadRequestError('coupon usage limit exceeded');
+        }
+      }
+
+      // check minOrderValue against cart finalPrice if available
+      const cartFinal = typeof cart.finalPrice === 'number' ? cart.finalPrice : 0;
+      if (coupon.minOrderValue !== undefined && coupon.minOrderValue > cartFinal) {
+        throw new BadRequestError('cart does not meet coupon minimum order value');
+      }
+
+      // increment usedCount (mark coupon as used once for this order)
+      coupon.usedCount = (coupon.usedCount || 0) + 1;
+      await this.couponRepo.save(coupon as any);
+    }
+
     const order = this.orderRepo.create({
       customerId: payload.customerId.trim(),
       cartId: payload.cartId.trim(),
@@ -212,6 +256,7 @@ export class OrderService {
       arrivalName: payload.arrivalName.trim(),
       arrivalPhone: payload.arrivalPhone.trim(),
       arrivalAddress: payload.arrivalAddress.trim(),
+      couponCode: payload.coupon?.trim(),
       arrivalTime: this.parseArrivalTime(payload.arrivalTime),
       note: payload.note?.trim(),
     });

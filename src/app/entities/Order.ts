@@ -33,6 +33,9 @@ export class Order {
   @Column({ nullable: true })
   note?: string;
 
+  @Column({ nullable: true })
+  couponCode?: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

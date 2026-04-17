@@ -17,6 +17,7 @@ import adminCouponRouter from './app/features/admin/coupons';
 import categoryRouter from './app/features/guest/category';
 import brandRouter from './app/features/guest/brand';
 import productRouter from './app/features/guest/product';
+import guestCouponRouter from './app/features/guest/coupon';
 import provinceRouter from './app/features/guest/province';
 import wardRouter from './app/features/guest/ward';
 
@@ -40,6 +41,7 @@ app.use('/', adminCouponRouter);
 app.use('/', categoryRouter);
 app.use('/', brandRouter);
 app.use('/', productRouter);
+app.use('/', guestCouponRouter);
 app.use('/', provinceRouter);
 app.use('/', wardRouter);
 

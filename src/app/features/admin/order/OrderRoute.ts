@@ -3,6 +3,7 @@ import {
   AdminCreateOrderPayload,
   AdminOrderService,
   AdminUpdateOrderPayload,
+  AdminUpdateOrderStatusPayload,
 } from './OrderService';
 
 const router = Router();
@@ -80,6 +81,21 @@ router.put('/admin/orders/:id', async (req: Request, res: Response, next: NextFu
     res.status(200).json({
       success: true,
       message: 'Order updated successfully',
+      data: order,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/admin/orders/:id/status', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const payload = req.body as AdminUpdateOrderStatusPayload;
+    const order = await adminOrderService.updateOrderStatus(req.params.id as string, payload);
+
+    res.status(200).json({
+      success: true,
+      message: 'Order status updated successfully',
       data: order,
     });
   } catch (error) {

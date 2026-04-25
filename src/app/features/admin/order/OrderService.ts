@@ -37,6 +37,10 @@ export interface AdminUpdateOrderPayload {
   note?: string;
 }
 
+export interface AdminUpdateOrderStatusPayload {
+  status: string;
+}
+
 export interface AdminOrderListResponse {
   items: AdminOrderItem[];
   meta: {
@@ -255,6 +259,18 @@ export class AdminOrderService {
 
     order.customerId = nextCustomerId;
     order.cartId = nextCartId;
+
+    return this.orderRepo.save(order);
+  }
+
+  async updateOrderStatus(orderId: string, payload: AdminUpdateOrderStatusPayload): Promise<Order> {
+    const status = payload.status?.trim();
+    if (!status) {
+      throw new BadRequestError('status is required');
+    }
+
+    const order = await this.getOrderEntityById(orderId);
+    order.status = status;
 
     return this.orderRepo.save(order);
   }

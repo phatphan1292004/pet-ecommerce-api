@@ -38,12 +38,10 @@ export class CartService {
   async upsertOpenCart(payload: UpsertCartPayload): Promise<Cart> {
     this.validateCustomerId(payload.customerId);
 
-    const products = this.normalizeProducts(payload.products ?? payload.items ?? []);
-    const totalDiscount = Number(payload.totalDiscount ?? 0);
-
-    const totals = this.calculateTotals(products, totalDiscount);
-
     const existingCart = await this.getCart(payload.customerId, 'open');
+    const productsInput = payload.products ?? payload.items ?? existingCart?.products ?? [];
+    const products = this.normalizeProducts(productsInput);
+    const totals = this.calculateTotals(products, payload);
 
     if (existingCart) {
       existingCart.products = products;
@@ -131,12 +129,11 @@ export class CartService {
 
   async clearOpenCart(customerId: string): Promise<Cart> {
     this.validateCustomerId(customerId);
-    const existingCart = await this.getCart(customerId, 'open');
 
     return this.upsertOpenCart({
       customerId,
       products: [],
-      totalDiscount: existingCart?.totalDiscount ?? 0,
+      totalDiscount: 0,
     });
   }
 
@@ -169,13 +166,27 @@ export class CartService {
       }));
   }
 
-  private calculateTotals(products: CartProduct[], discountValue: number): {
+  private calculateTotals(products: CartProduct[], payload: UpsertCartPayload): {
     totalPrice: number;
     totalDiscount: number;
     finalPrice: number;
   } {
     const totalPrice = products.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const totalDiscount = Math.max(0, Number(discountValue || 0));
+    const explicitFinalPrice = this.toFiniteNumber(payload.finalPrice);
+    const explicitTotalDiscount = this.toFiniteNumber(payload.totalDiscount);
+
+    if (explicitFinalPrice !== undefined) {
+      const finalPrice = Math.min(totalPrice, Math.max(0, explicitFinalPrice));
+      const totalDiscount = Math.min(totalPrice, Math.max(0, totalPrice - finalPrice));
+
+      return {
+        totalPrice,
+        totalDiscount,
+        finalPrice,
+      };
+    }
+
+    const totalDiscount = Math.min(totalPrice, Math.max(0, explicitTotalDiscount ?? 0));
     const finalPrice = Math.max(0, totalPrice - totalDiscount);
 
     return {
@@ -183,6 +194,14 @@ export class CartService {
       totalDiscount,
       finalPrice,
     };
+  }
+
+  private toFiniteNumber(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return undefined;
+    }
+
+    return value;
   }
 
   private validateCustomerId(customerId: string): void {

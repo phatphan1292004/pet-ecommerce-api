@@ -51,6 +51,7 @@ export interface AdminOrderListResponse {
 
 export interface AdminOrderItem extends Order {
   customerPhotoURL?: string;
+  finalPrice: number | null;
 }
 
 export interface AdminOrderDetail extends AdminOrderItem {
@@ -88,13 +89,42 @@ export class AdminOrderService {
     const totalPages = Math.ceil(totalItems / limit);
     const startIndex = (page - 1) * limit;
     const pagedOrders = sortedOrders.slice(startIndex, startIndex + limit);
+
+    const cartObjectIds = pagedOrders
+      .map((order) => this.toObjectId(order.cartId))
+      .filter((id): id is ObjectId => id !== null);
+
+    const uniqueCartObjectIds = Array.from(
+      new Map(cartObjectIds.map((id) => [id.toHexString(), id])).values(),
+    );
+
+    const carts =
+      uniqueCartObjectIds.length > 0
+        ? await this.cartRepo.find({
+            where: {
+              _id: {
+                $in: uniqueCartObjectIds,
+              } as any,
+            },
+          })
+        : [];
+
+    const cartsById = new Map(carts.map((cart) => [cart._id.toHexString(), cart]));
+
     const customerPhotoMap = await this.getCustomerPhotoMap(
       pagedOrders.map((order) => order.customerId),
     );
-    const items = pagedOrders.map((order) => ({
-      ...order,
-      customerPhotoURL: customerPhotoMap.get(order.customerId),
-    }));
+
+    const items = pagedOrders.map((order) => {
+      const cartObjectId = this.toObjectId(order.cartId);
+      const cart = cartObjectId ? cartsById.get(cartObjectId.toHexString()) : null;
+
+      return {
+        ...order,
+        customerPhotoURL: customerPhotoMap.get(order.customerId),
+        finalPrice: typeof cart?.finalPrice === 'number' ? cart.finalPrice : null,
+      };
+    });
 
     return {
       items,
@@ -123,6 +153,7 @@ export class AdminOrderService {
     return {
       ...order,
       customerPhotoURL: customerPhotoMap.get(order.customerId),
+      finalPrice: typeof cart?.finalPrice === 'number' ? cart.finalPrice : null,
       cart,
     };
   }

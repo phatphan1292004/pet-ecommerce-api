@@ -35,6 +35,10 @@ export interface AdminUpdateUserPayload {
   roleId?: string | null;
 }
 
+export interface AdminLockUserPayload {
+  isLocked: boolean;
+}
+
 export interface AdminUserAddressResponse {
   id: string;
   address: string;
@@ -72,6 +76,7 @@ export interface AdminUserResponse {
     description: string | null;
   } | null;
   addresses: AdminUserAddressResponse[];
+  isLocked: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -166,6 +171,7 @@ export class AdminUserService {
       birthDate: payload.birthDate?.trim(),
       gender: payload.gender?.trim(),
       role: role?._id,
+      isLocked: false,
     });
 
     const savedUser = await this.customerRepo.save(user);
@@ -257,6 +263,43 @@ export class AdminUserService {
     }
   }
 
+  async lockUser(userId: string, payload: AdminLockUserPayload): Promise<AdminUserResponse> {
+    if (typeof payload.isLocked !== 'boolean') {
+      throw new BadRequestError('isLocked must be a boolean');
+    }
+
+    const user = await this.getUserEntityById(userId);
+
+    user.isLocked = payload.isLocked;
+
+    const savedUser = await this.customerRepo.save(user);
+    return this.toAdminUserResponse(savedUser);
+  }
+
+  async downgradeStaffRole(userId: string): Promise<AdminUserResponse> {
+    const user = await this.getUserEntityById(userId);
+    const downgraded = await this.downgradeRoleIfStaff(user);
+
+    if (!downgraded) {
+      throw new BadRequestError('User role is not STAFF');
+    }
+
+    const savedUser = await this.customerRepo.save(user);
+    return this.toAdminUserResponse(savedUser);
+  }
+
+  async promoteUserToStaffRole(userId: string): Promise<AdminUserResponse> {
+    const user = await this.getUserEntityById(userId);
+    const promoted = await this.promoteRoleIfUser(user);
+
+    if (!promoted) {
+      throw new BadRequestError('User role is not USER');
+    }
+
+    const savedUser = await this.customerRepo.save(user);
+    return this.toAdminUserResponse(savedUser);
+  }
+
   private validateCreatePayload(payload: AdminCreateUserPayload): void {
     if (!payload.firebaseUid?.trim()) {
       throw new BadRequestError('firebaseUid is required');
@@ -317,6 +360,53 @@ export class AdminUserService {
     return user;
   }
 
+  private async downgradeRoleIfStaff(user: Customer): Promise<boolean> {
+    const currentRoleId = this.toObjectId(user.role);
+    if (!currentRoleId) {
+      return false;
+    }
+
+    const currentRole = await this.roleRepo.findOne({ where: { _id: currentRoleId } });
+    if (!currentRole || currentRole.name.trim().toUpperCase() !== 'STAFF') {
+      return false;
+    }
+
+    const userRole = await this.findRoleByName('USER');
+
+    if (!userRole) {
+      throw new NotFoundError('Default USER role not found');
+    }
+
+    user.role = userRole._id;
+    return true;
+  }
+
+  private async promoteRoleIfUser(user: Customer): Promise<boolean> {
+    const currentRoleId = this.toObjectId(user.role);
+    if (!currentRoleId) {
+      return false;
+    }
+
+    const currentRole = await this.roleRepo.findOne({ where: { _id: currentRoleId } });
+    if (!currentRole || currentRole.name.trim().toUpperCase() !== 'USER') {
+      return false;
+    }
+
+    const staffRole = await this.findRoleByName('STAFF');
+
+    if (!staffRole) {
+      throw new NotFoundError('Default STAFF role not found');
+    }
+
+    user.role = staffRole._id;
+    return true;
+  }
+
+  private async findRoleByName(roleName: string): Promise<Role | null> {
+    const roles = await this.roleRepo.find();
+    return roles.find((role) => role.name.trim().toUpperCase() === roleName.trim().toUpperCase()) ?? null;
+  }
+
   private async toAdminUserResponse(user: Customer): Promise<AdminUserResponse> {
     const roleObjectId = this.toObjectId(user.role);
     const [role, addresses] = await Promise.all([
@@ -346,6 +436,7 @@ export class AdminUserService {
           }
         : null,
       addresses: sortedAddresses.map((address) => this.toAdminUserAddressResponse(address)),
+      isLocked: Boolean(user.isLocked),
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };

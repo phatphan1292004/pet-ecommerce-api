@@ -30,6 +30,9 @@ export class Customer {
   @Column({ nullable: true })
   role?: ObjectId | string;
 
+  @Column({ default: false })
+  isLocked: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -104,13 +104,14 @@ router.get('/products/filter', async (req: Request, res: Response, next: NextFun
 router.get('/products/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const slug = req.params.slug as string;
+    const customerId = typeof req.query.customerId === 'string' ? req.query.customerId : undefined;
     
     // Prevent matching static routes
     if (slug === 'latest' || slug === 'filter') {
       return next();
     }
 
-    const product = await productService.getProductBySlug(slug);
+    const product = await productService.getProductBySlug(slug, customerId);
     res.json({
       success: true,
       data: product

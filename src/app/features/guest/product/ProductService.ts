@@ -1,5 +1,6 @@
 import { AppDataSource } from '@/app/database';
 import { Category } from '@/app/entities/Categories';
+import { Favorite } from '@/app/entities/Favorite';
 import { Product } from '@/app/entities/Product';
 import { NotFoundError, BadRequestError } from '@/app/exceptions/AppError';
 import { ObjectId } from 'mongodb';
@@ -37,6 +38,7 @@ export interface ProductFilterResult {
 
 export interface ProductDetailResponse extends ProductResponse {
   brand: string;
+  isFavorite: boolean;
   description: string;
   longDescription: string;
   images: string[];
@@ -51,6 +53,7 @@ export interface ProductDetailResponse extends ProductResponse {
 export class ProductService {
   private repo = AppDataSource.getMongoRepository(Product);
   private categoryRepo = AppDataSource.getMongoRepository(Category);
+  private favoriteRepo = AppDataSource.getMongoRepository(Favorite);
   private brandNameByIdCache: Map<string, string> | null = null;
   private brandCacheExpiresAt = 0;
   private readonly brandCacheTtlMs = 5 * 60 * 1000;
@@ -90,7 +93,7 @@ export class ProductService {
   /**
    * Get product detail by slug
    */
-  async getProductBySlug(slug: string): Promise<ProductDetailResponse> {
+  async getProductBySlug(slug: string, customerId?: string): Promise<ProductDetailResponse> {
     if (!slug || slug.trim().length === 0) {
       throw new BadRequestError('Slug cannot be empty');
     }
@@ -104,8 +107,9 @@ export class ProductService {
     }
 
     const brandName = await this.findBrandNameById(product.brand);
+    const isFavorite = await this.isProductInFavorite(product._id, customerId);
 
-    return this.toProductDetailResponse(product, brandName);
+    return this.toProductDetailResponse(product, brandName, isFavorite);
   }
 
   /**
@@ -211,7 +215,7 @@ export class ProductService {
   /**
    * Map Product entity to ProductDetailResponse
    */
-  private toProductDetailResponse(product: Product, brandName: string): ProductDetailResponse {
+  private toProductDetailResponse(product: Product, brandName: string, isFavorite: boolean): ProductDetailResponse {
     return {
       _id: product._id,
       name: product.name,
@@ -222,6 +226,7 @@ export class ProductService {
       review: product.review,
       image: product.images && product.images.length > 0 ? product.images[0] : '',
       brand: brandName,
+      isFavorite,
       description: product.description,
       longDescription: product.longDescription,
       images: product.images || [],
@@ -266,6 +271,49 @@ export class ProductService {
 
   private escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private async isProductInFavorite(productId: ObjectId, customerId?: string): Promise<boolean> {
+    const normalizedCustomerId = customerId?.trim();
+    if (!normalizedCustomerId) {
+      return false;
+    }
+
+    const favorite = await this.favoriteRepo.findOne({
+      where: {
+        customerId: normalizedCustomerId
+      }
+    });
+
+    if (!favorite) {
+      return false;
+    }
+
+    const legacyProductIds = (favorite as Favorite & { productIds?: unknown }).productIds;
+    const normalizedProductIds = this.normalizeFavoriteProductIds(favorite.products ?? legacyProductIds);
+
+    return normalizedProductIds.includes(productId.toHexString());
+  }
+
+  private normalizeFavoriteProductIds(values: unknown): string[] {
+    if (!Array.isArray(values)) {
+      return [];
+    }
+
+    return values
+      .map((value) => {
+        if (value instanceof ObjectId) {
+          return value.toHexString();
+        }
+
+        if (typeof value === 'string') {
+          const normalized = value.trim();
+          return ObjectId.isValid(normalized) ? new ObjectId(normalized).toHexString() : null;
+        }
+
+        return null;
+      })
+      .filter((value): value is string => typeof value === 'string');
   }
 
   private async findBrandNameById(brandId: ObjectId): Promise<string> {

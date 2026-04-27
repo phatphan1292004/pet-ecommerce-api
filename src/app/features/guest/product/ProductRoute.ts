@@ -5,6 +5,44 @@ const router = Router();
 const productService = new ProductService();
 
 /**
+ * GET /products/search
+ * Search products by query `q` across name/slug/description
+ * Example: /products/search?q=chon+thuc+an&page=1&limit=12&sortBy=priceAsc
+ */
+router.get('/products/search', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parseNumber = (value: unknown): number | undefined => {
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        return undefined;
+      }
+
+      const parsedValue = Number(value);
+      return Number.isFinite(parsedValue) ? parsedValue : undefined;
+    };
+
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    const page = parseNumber(req.query.page);
+    const limit = parseNumber(req.query.limit);
+    const sortBy = typeof req.query.sortBy === 'string' ? (req.query.sortBy as any) : undefined;
+
+    const result = await productService.searchProducts(q, page, limit, sortBy);
+
+    res.json({
+      success: true,
+      data: result.items,
+      pagination: {
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        totalPages: result.totalPages
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * GET /products/latest
  * Get 10 latest active products
  * NOTE: This route must be defined BEFORE :slug route to avoid conflicts

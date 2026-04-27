@@ -194,6 +194,60 @@ export class ProductService {
     };
   }
 
+  /**
+   * Search products by keyword (name / slug / description) with pagination and sorting
+   */
+  async searchProducts(
+    q: string,
+    page?: number,
+    limit?: number,
+    sortBy?: ProductFilterParams['sortBy']
+  ): Promise<ProductFilterResult> {
+    const keyword = q?.trim() ?? '';
+    const pageNum = page && page > 0 ? Math.floor(page) : 1;
+    const limitNum = limit && limit > 0 ? Math.min(Math.floor(limit), 60) : 12;
+    const skip = (pageNum - 1) * limitNum;
+
+    if (!keyword) {
+      return this.filterProducts({ page: pageNum, limit: limitNum, sortBy });
+    }
+
+    const keywordRegex = new RegExp(this.escapeRegex(keyword), 'i');
+
+    const match: Record<string, unknown> = {
+      is_active: true,
+      $or: [{ name: keywordRegex }, { slug: keywordRegex }, { description: keywordRegex }]
+    };
+
+    const sortStage = this.getSortStage(sortBy ?? 'latest');
+
+    const pipeline = [
+      { $match: match },
+      {
+        $facet: {
+          items: [{ $sort: sortStage }, { $skip: skip }, { $limit: limitNum }],
+          total: [{ $count: 'count' }]
+        }
+      }
+    ];
+
+    const aggregateResult = (await this.repo.aggregate(pipeline).toArray()) as Array<{
+      items: Product[];
+      total: Array<{ count: number }>;
+    }>;
+
+    const firstResult = aggregateResult[0] ?? { items: [], total: [] };
+    const total = firstResult.total[0]?.count ?? 0;
+
+    return {
+      items: firstResult.items.map(this.toProductResponse),
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: total > 0 ? Math.ceil(total / limitNum) : 0
+    };
+  }
+
   // Helper methods
 
   /**

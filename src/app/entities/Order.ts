@@ -18,6 +18,9 @@ export class Order {
   @Column({ default: 'cash' })
   paymentMethod: string;
 
+  @Column({ default: false })
+  isPaid: boolean;
+
   @Column()
   arrivalName: string;
 

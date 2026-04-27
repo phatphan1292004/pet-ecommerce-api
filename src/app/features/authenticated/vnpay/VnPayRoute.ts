@@ -1,237 +1,242 @@
 import express, { Request, Response } from "express";
-import * as crypto from "crypto";
+import crypto from "crypto";
 import qs from "qs";
+import { ObjectId } from "mongodb";
+import { AppDataSource } from "@/app/database";
+import { Cart } from "@/app/entities/Cart";
+import { Order } from "@/app/entities/Order";
 
 const router = express.Router();
+const orderRepo = AppDataSource.getMongoRepository(Order);
+const cartRepo = AppDataSource.getMongoRepository(Cart);
 
-const formatVnPayDate = (date: Date): string => {
-  const vnDate = new Date(date.getTime() + 7 * 60 * 60 * 1000);
-  return vnDate
+const formatDate = (date: Date) =>
+  new Date(date.getTime() + 7 * 60 * 60 * 1000)
     .toISOString()
     .replace(/[-:TZ.]/g, "")
     .slice(0, 14);
+
+const getClientIp = (req: Request) => {
+  const ip =
+    (req.headers["x-forwarded-for"] as string)?.split(",")[0] ||
+    req.socket.remoteAddress ||
+    req.ip ||
+    "127.0.0.1";
+
+  return ip.replace(/^::ffff:/, "").replace("::1", "127.0.0.1");
 };
 
-const normalizeIp = (ip: string): string => {
-  if (ip === "::1") {
-    return "127.0.0.1";
-  }
-
-  if (ip.startsWith("::ffff:")) {
-    return ip.slice(7);
-  }
-
-  return ip;
+const sortParams = (params: Record<string, any>) => {
+  return Object.keys(params)
+    .sort()
+    .reduce((acc: any, key) => {
+      if (params[key] !== undefined && params[key] !== null) {
+        acc[key] = encodeURIComponent(params[key]).replace(/%20/g, "+");
+      }
+      return acc;
+    }, {});
 };
 
-const getClientIp = (req: Request): string => {
-  const forwardedFor = req.headers["x-forwarded-for"];
-
-  if (Array.isArray(forwardedFor) && forwardedFor.length > 0) {
-    return normalizeIp(forwardedFor[0].split(",")[0].trim());
-  }
-
-  if (typeof forwardedFor === "string" && forwardedFor.length > 0) {
-    return normalizeIp(forwardedFor.split(",")[0].trim());
-  }
-
-  return normalizeIp(req.socket.remoteAddress || req.ip || "127.0.0.1");
+const sign = (params: Record<string, any>, secret: string) => {
+  const query = qs.stringify(sortParams(params), { encode: false });
+  return crypto.createHmac("sha512", secret).update(query).digest("hex");
 };
 
-const sortAndEncodeParams = (
-  params: Record<string, string | number>,
-): Record<string, string> => {
-  const sortedKeys = Object.keys(params).sort();
-  const result: Record<string, string> = {};
+const parseQueryParams = (query: Request["query"]): Record<string, string> => {
+  const normalized: Record<string, string> = {};
 
-  for (const key of sortedKeys) {
-    const value = params[key];
-
-    if (value === undefined || value === null) {
+  for (const [key, value] of Object.entries(query)) {
+    if (Array.isArray(value)) {
+      if (value[0] !== undefined) {
+        normalized[key] = String(value[0]);
+      }
       continue;
     }
 
-    result[key] = encodeURIComponent(String(value)).replace(/%20/g, "+");
-  }
-
-  return result;
-};
-
-const getSignData = (params: Record<string, string | number>): string => {
-  const encodedParams = sortAndEncodeParams(params);
-  return qs.stringify(encodedParams, { encode: false });
-};
-
-const getRawQueryParams = (originalUrl: string): Record<string, string> => {
-  const result: Record<string, string> = {};
-  const queryIndex = originalUrl.indexOf("?");
-
-  if (queryIndex < 0) {
-    return result;
-  }
-
-  const queryString = originalUrl.slice(queryIndex + 1);
-  const pairs = queryString.split("&").filter(Boolean);
-
-  for (const pair of pairs) {
-    const separatorIndex = pair.indexOf("=");
-
-    if (separatorIndex < 0) {
-      result[pair] = "";
-      continue;
+    if (value !== undefined) {
+      normalized[key] = String(value);
     }
-
-    const key = pair.slice(0, separatorIndex);
-    const value = pair.slice(separatorIndex + 1);
-    result[key] = value;
   }
 
-  return result;
+  return normalized;
 };
 
-const getRawSignData = (params: Record<string, string>): string => {
-  const sortedKeys = Object.keys(params).sort();
-  const sortedParams: Record<string, string> = {};
-
-  for (const key of sortedKeys) {
-    sortedParams[key] = params[key];
+const toObjectId = (value?: string): ObjectId | null => {
+  if (!value?.trim()) {
+    return null;
   }
 
-  return qs.stringify(sortedParams, { encode: false });
+  try {
+    return new ObjectId(value.trim());
+  } catch {
+    return null;
+  }
 };
 
+const getOrderAmountInVnpUnit = async (order: Order): Promise<number | null> => {
+  const cartObjectId = toObjectId(order.cartId);
+  if (!cartObjectId) {
+    return null;
+  }
+
+  const cart = await cartRepo.findOne({
+    where: { _id: cartObjectId },
+  });
+
+  if (!cart || typeof cart.finalPrice !== "number") {
+    return null;
+  }
+
+  return Math.round(cart.finalPrice * 100);
+};
+
+const ipnResponse = (RspCode: string, Message: string) => ({ RspCode, Message });
+
+
+// ================= CREATE PAYMENT =================
 router.post("/create_payment", (req: Request, res: Response) => {
   try {
     const { amount, orderId } = req.body;
+
     if (!amount || !orderId) {
-      return res
-        .status(400)
-        .json({ message: "amount and orderId are required" });
+      return res.status(400).json({ message: "Missing data" });
     }
 
-    const amountNum = Number(amount);
-    if (Number.isNaN(amountNum) || amountNum <= 0) {
-      return res.status(400).json({ message: "invalid amount" });
-    }
-
-    const tmnCode = process.env.VNP_TMNCODE;
-    const secretKey = process.env.VNP_HASHSECRET;
-    const returnUrl = process.env.VNP_RETURN_URL;
+    const tmnCode = process.env.VNP_TMNCODE!;
+    const secretKey = process.env.VNP_HASHSECRET!;
+    const returnUrl = process.env.VNP_RETURN_URL!;
     const vnpUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
 
-    if (!tmnCode || !secretKey || !returnUrl) {
-      return res.status(500).json({ message: "VnPay configuration missing" });
-    }
-
-    const createDate = formatVnPayDate(new Date());
-    const txnRef = String(orderId);
-
-    const vnp_Params: Record<string, string | number> = {
+    const params = {
       vnp_Version: "2.1.0",
       vnp_Command: "pay",
       vnp_TmnCode: tmnCode,
-      vnp_Amount: amountNum * 100,
-      vnp_CreateDate: createDate,
+      vnp_Amount: Number(amount) * 100,
+      vnp_CreateDate: formatDate(new Date()),
       vnp_CurrCode: "VND",
       vnp_IpAddr: getClientIp(req),
       vnp_Locale: "vn",
-      vnp_OrderInfo: `Thanh toan don hang ${txnRef}`,
+      vnp_OrderInfo: `Thanh toan don hang ${orderId}`,
       vnp_OrderType: "other",
       vnp_ReturnUrl: returnUrl,
-      vnp_TxnRef: txnRef,
+      vnp_TxnRef: String(orderId),
     };
 
-    const signData = getSignData(vnp_Params);
-    const hmac = crypto.createHmac("sha512", secretKey);
-    const signed = hmac.update(signData, "utf-8").digest("hex");
+    const secureHash = sign(params, secretKey);
 
-    const queryParams: Record<string, string | number> = {
-      ...sortAndEncodeParams(vnp_Params),
-      vnp_SecureHash: signed,
-    };
-
-    const paymentUrl = `${vnpUrl}?${qs.stringify(queryParams, { encode: false })}`;
+    const paymentUrl =
+      vnpUrl +
+      "?" +
+      qs.stringify(
+        {
+          ...sortParams(params),
+          vnp_SecureHash: secureHash,
+        },
+        { encode: false }
+      );
 
     return res.json({ paymentUrl });
-  } catch (error) {
-    console.error("VnPay create_payment error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error" });
   }
 });
 
-router.get("/payment_return", (req: Request, res: Response) => {
+
+// ================= PAYMENT IPN =================
+router.get("/payment_ipn", async (req: Request, res: Response) => {
   try {
     const secretKey = process.env.VNP_HASHSECRET;
 
     if (!secretKey) {
-      return res.status(500).json({ message: "VnPay configuration missing" });
+      return res.status(200).json(ipnResponse("99", "Config error"));
     }
 
-    const vnp_Params: Record<string, string> = {};
+    const params = parseQueryParams(req.query);
+    const secureHash = params.vnp_SecureHash;
 
-    for (const [key, value] of Object.entries(req.query)) {
-      if (Array.isArray(value)) {
-        if (value[0] !== undefined) {
-          vnp_Params[key] = String(value[0]);
-        }
-      } else if (value !== undefined) {
-        vnp_Params[key] = String(value);
-      }
+    delete params.vnp_SecureHash;
+    delete params.vnp_SecureHashType;
+
+    const signed = sign(params, secretKey);
+    const isValidSignature = String(secureHash || "").toLowerCase() === signed.toLowerCase();
+
+    if (!isValidSignature) {
+      return res.status(200).json(ipnResponse("97", "Invalid signature"));
     }
 
-    const secureHash = vnp_Params["vnp_SecureHash"];
-
-    // xóa hash trước khi verify
-    delete vnp_Params["vnp_SecureHash"];
-    delete vnp_Params["vnp_SecureHashType"];
-
-    const rawParams = getRawQueryParams(req.originalUrl);
-    delete rawParams["vnp_SecureHash"];
-    delete rawParams["vnp_SecureHashType"];
-
-    const signData = getSignData(vnp_Params);
-    const rawSignData = getRawSignData(rawParams);
-    const hmac = crypto.createHmac("sha512", secretKey);
-    const signed = hmac.update(signData, "utf-8").digest("hex");
-    const rawHmac = crypto.createHmac("sha512", secretKey);
-    const rawSigned = rawHmac.update(rawSignData, "utf-8").digest("hex");
-    const normalizedSecureHash = String(secureHash || "").toLowerCase();
-    const isValidSignature =
-      normalizedSecureHash === signed.toLowerCase() ||
-      normalizedSecureHash === rawSigned.toLowerCase();
-
-      console.log('vđv ', req);
-    if (isValidSignature) {
-      const responseCode = vnp_Params["vnp_ResponseCode"];
-      const isSuccess = responseCode === "00";
-
-      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-
-      if (isSuccess) {
-        return res.redirect(
-          `${frontendUrl}/cart/payment/vnpay-return?status=success&orderId=${vnp_Params["vnp_TxnRef"]}`,
-        );
-      } else {
-        return res.redirect(
-          `${frontendUrl}/cart/payment/vnpay-return?status=fail&code=${responseCode}`,
-        );
-      }
-    } else {
-      console.error("VnPay payment_return signature mismatch", {
-        secureHash,
-        signed,
-        rawSigned,
-        signData,
-        rawSignData,
-      });
-
-      return res.status(400).json({
-        message: "Sai chữ ký",
-      });
+    const txnRef = params.vnp_TxnRef;
+    const orderObjectId = toObjectId(txnRef);
+    if (!orderObjectId) {
+      return res.status(200).json(ipnResponse("01", "Order not found"));
     }
-  } catch (error) {
-    console.error("VnPay payment_return error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+
+    const order = await orderRepo.findOne({
+      where: { _id: orderObjectId },
+    });
+
+    if (!order) {
+      return res.status(200).json(ipnResponse("01", "Order not found"));
+    }
+
+    const expectedAmount = await getOrderAmountInVnpUnit(order);
+    const paidAmount = Number(params.vnp_Amount);
+    if (expectedAmount === null || !Number.isFinite(paidAmount) || paidAmount !== expectedAmount) {
+      return res.status(200).json(ipnResponse("04", "Invalid amount"));
+    }
+
+    if (order.isPaid) {
+      return res.status(200).json(ipnResponse("02", "Order already confirmed"));
+    }
+
+    const transactionStatus = params.vnp_TransactionStatus || params.vnp_ResponseCode;
+    const isSuccess = params.vnp_ResponseCode === "00" && transactionStatus === "00";
+
+    if (isSuccess) {
+      order.isPaid = true;
+      await orderRepo.save(order);
+    }
+
+    return res.status(200).json(ipnResponse("00", "Confirm Success"));
+  } catch (err) {
+    console.error("payment_ipn error", err);
+    return res.status(200).json(ipnResponse("99", "Unknown error"));
+  }
+});
+
+
+// ================= PAYMENT RETURN =================
+router.get("/payment_return", (req: Request, res: Response) => {
+  try {
+    const secretKey = process.env.VNP_HASHSECRET!;
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+
+    const params = parseQueryParams(req.query);
+
+    const secureHash = params.vnp_SecureHash;
+    delete params.vnp_SecureHash;
+    delete params.vnp_SecureHashType;
+
+    const isValid = String(secureHash || "").toLowerCase() === sign(params, secretKey).toLowerCase();
+
+    if (!isValid) {
+      return res.status(400).json({ message: "Invalid signature" });
+    }
+
+    const isSuccess = params.vnp_ResponseCode === "00";
+
+    if (isSuccess) {
+      return res.redirect(
+        `${frontendUrl}/cart/payment/vnpay-return?status=success&orderId=${params.vnp_TxnRef}&amount=${params.vnp_Amount}&transactionNo=${params.vnp_TransactionNo}`
+      );
+    }
+
+    return res.redirect(
+      `${frontendUrl}/cart/payment/vnpay-return?status=fail&code=${params.vnp_ResponseCode}`
+    );
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error" });
   }
 });
 

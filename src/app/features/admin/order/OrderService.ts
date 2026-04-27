@@ -125,6 +125,7 @@ export class AdminOrderService {
 
       return {
         ...order,
+        isPaid: order.isPaid ?? false,
         customerPhotoURL: customerPhotoMap.get(order.customerId),
         finalPrice: typeof cart?.finalPrice === 'number' ? cart.finalPrice : null,
       };
@@ -156,6 +157,7 @@ export class AdminOrderService {
 
     return {
       ...order,
+      isPaid: order.isPaid ?? false,
       customerPhotoURL: customerPhotoMap.get(order.customerId),
       finalPrice: typeof cart?.finalPrice === 'number' ? cart.finalPrice : null,
       cart,
@@ -175,6 +177,7 @@ export class AdminOrderService {
       cartId,
       status: payload.status?.trim() || 'pending',
       paymentMethod: payload.paymentMethod?.trim() || 'cash',
+      isPaid: false,
       arrivalName: payload.arrivalName.trim(),
       arrivalPhone: payload.arrivalPhone.trim(),
       arrivalAddress: payload.arrivalAddress.trim(),

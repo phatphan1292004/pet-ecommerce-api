@@ -34,6 +34,7 @@ export interface OrderListItem {
   cartId: string;
   status: string;
   paymentMethod: string;
+  isPaid: boolean;
   arrivalName: string;
   arrivalPhone: string;
   arrivalAddress: string;
@@ -148,6 +149,7 @@ export class OrderService {
           cartId: order.cartId,
           status: order.status,
           paymentMethod: order.paymentMethod,
+          isPaid: order.isPaid ?? false,
           arrivalName: order.arrivalName,
           arrivalPhone: order.arrivalPhone,
           arrivalAddress: order.arrivalAddress,
@@ -253,6 +255,7 @@ export class OrderService {
       cartId: payload.cartId.trim(),
       status: payload.status?.trim() || 'pending',
       paymentMethod: payload.paymentMethod?.trim() || 'cash',
+      isPaid: false,
       arrivalName: payload.arrivalName.trim(),
       arrivalPhone: payload.arrivalPhone.trim(),
       arrivalAddress: payload.arrivalAddress.trim(),

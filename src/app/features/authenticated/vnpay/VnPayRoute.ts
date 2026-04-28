@@ -26,7 +26,18 @@ const getClientIp = (req: Request) => {
   return ip.replace(/^::ffff:/, "").replace("::1", "127.0.0.1");
 };
 
-const sortParams = (params: Record<string, any>) => {
+const sortParamsRaw = (params: Record<string, any>) => {
+  return Object.keys(params)
+    .sort()
+    .reduce((acc: any, key) => {
+      if (params[key] !== undefined && params[key] !== null) {
+        acc[key] = params[key];
+      }
+      return acc;
+    }, {});
+};
+
+const sortParamsEncoded = (params: Record<string, any>) => {
   return Object.keys(params)
     .sort()
     .reduce((acc: any, key) => {
@@ -38,7 +49,7 @@ const sortParams = (params: Record<string, any>) => {
 };
 
 const sign = (params: Record<string, any>, secret: string) => {
-  const query = qs.stringify(sortParams(params), { encode: false });
+  const query = qs.stringify(sortParamsRaw(params), { encode: false });
   return crypto.createHmac("sha512", secret).update(query).digest("hex");
 };
 
@@ -73,7 +84,9 @@ const toObjectId = (value?: string): ObjectId | null => {
   }
 };
 
-const getOrderAmountInVnpUnit = async (order: Order): Promise<number | null> => {
+const getOrderAmountInVnpUnit = async (
+  order: Order,
+): Promise<number | null> => {
   const cartObjectId = toObjectId(order.cartId);
   if (!cartObjectId) {
     return null;
@@ -90,8 +103,10 @@ const getOrderAmountInVnpUnit = async (order: Order): Promise<number | null> => 
   return Math.round(cart.finalPrice * 100);
 };
 
-const ipnResponse = (RspCode: string, Message: string) => ({ RspCode, Message });
-
+const ipnResponse = (RspCode: string, Message: string) => ({
+  RspCode,
+  Message,
+});
 
 // ================= CREATE PAYMENT =================
 router.post("/create_payment", (req: Request, res: Response) => {
@@ -136,10 +151,10 @@ router.post("/create_payment", (req: Request, res: Response) => {
       "?" +
       qs.stringify(
         {
-          ...sortParams(params),
+          ...sortParamsEncoded(params),
           vnp_SecureHash: secureHash,
         },
-        { encode: false }
+        { encode: false },
       );
 
     return res.json({ paymentUrl });
@@ -148,7 +163,6 @@ router.post("/create_payment", (req: Request, res: Response) => {
     return res.status(500).json({ message: "Error" });
   }
 });
-
 
 // ================= PAYMENT IPN =================
 router.get("/payment_ipn", async (req: Request, res: Response) => {
@@ -166,7 +180,8 @@ router.get("/payment_ipn", async (req: Request, res: Response) => {
     delete params.vnp_SecureHashType;
 
     const signed = sign(params, secretKey);
-    const isValidSignature = String(secureHash || "").toLowerCase() === signed.toLowerCase();
+    const isValidSignature =
+      String(secureHash || "").toLowerCase() === signed.toLowerCase();
 
     if (!isValidSignature) {
       return res.status(200).json(ipnResponse("97", "Invalid signature"));
@@ -188,7 +203,11 @@ router.get("/payment_ipn", async (req: Request, res: Response) => {
 
     const expectedAmount = await getOrderAmountInVnpUnit(order);
     const paidAmount = Number(params.vnp_Amount);
-    if (expectedAmount === null || !Number.isFinite(paidAmount) || paidAmount !== expectedAmount) {
+    if (
+      expectedAmount === null ||
+      !Number.isFinite(paidAmount) ||
+      paidAmount !== expectedAmount
+    ) {
       return res.status(200).json(ipnResponse("04", "Invalid amount"));
     }
 
@@ -196,8 +215,10 @@ router.get("/payment_ipn", async (req: Request, res: Response) => {
       return res.status(200).json(ipnResponse("02", "Order already confirmed"));
     }
 
-    const transactionStatus = params.vnp_TransactionStatus || params.vnp_ResponseCode;
-    const isSuccess = params.vnp_ResponseCode === "00" && transactionStatus === "00";
+    const transactionStatus =
+      params.vnp_TransactionStatus || params.vnp_ResponseCode;
+    const isSuccess =
+      params.vnp_ResponseCode === "00" && transactionStatus === "00";
 
     if (isSuccess) {
       order.isPaid = true;
@@ -212,7 +233,6 @@ router.get("/payment_ipn", async (req: Request, res: Response) => {
   }
 });
 
-
 // ================= PAYMENT RETURN =================
 router.get("/payment_return", (req: Request, res: Response) => {
   try {
@@ -225,7 +245,9 @@ router.get("/payment_return", (req: Request, res: Response) => {
     delete params.vnp_SecureHash;
     delete params.vnp_SecureHashType;
 
-    const isValid = String(secureHash || "").toLowerCase() === sign(params, secretKey).toLowerCase();
+    const isValid =
+      String(secureHash || "").toLowerCase() ===
+      sign(params, secretKey).toLowerCase();
 
     if (!isValid) {
       return res.status(400).json({ message: "Invalid signature" });
@@ -235,12 +257,12 @@ router.get("/payment_return", (req: Request, res: Response) => {
 
     if (isSuccess) {
       return res.redirect(
-        `${frontendUrl}/cart/payment/vnpay-return?status=success&orderId=${params.vnp_TxnRef}&amount=${params.vnp_Amount}&transactionNo=${params.vnp_TransactionNo}`
+        `${frontendUrl}/cart/payment/vnpay-return?status=success&orderId=${params.vnp_TxnRef}&amount=${params.vnp_Amount}&transactionNo=${params.vnp_TransactionNo}`,
       );
     }
 
     return res.redirect(
-      `${frontendUrl}/cart/payment/vnpay-return?status=fail&code=${params.vnp_ResponseCode}`
+      `${frontendUrl}/cart/payment/vnpay-return?status=fail&code=${params.vnp_ResponseCode}`,
     );
   } catch (err) {
     console.error(err);

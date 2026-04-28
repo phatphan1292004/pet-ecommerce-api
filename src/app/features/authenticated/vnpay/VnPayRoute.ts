@@ -105,6 +105,12 @@ router.post("/create_payment", (req: Request, res: Response) => {
     const tmnCode = process.env.VNP_TMNCODE!;
     const secretKey = process.env.VNP_HASHSECRET!;
     const returnUrl = process.env.VNP_RETURN_URL!;
+    const ipnUrl = process.env.VNP_IPN_URL;
+
+    if (!ipnUrl) {
+      return res.status(500).json({ message: "Missing VNP_IPN_URL" });
+    }
+
     const vnpUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
 
     const params = {
@@ -118,6 +124,7 @@ router.post("/create_payment", (req: Request, res: Response) => {
       vnp_Locale: "vn",
       vnp_OrderInfo: `Thanh toan don hang ${orderId}`,
       vnp_OrderType: "other",
+      vnp_IpnUrl: ipnUrl,
       vnp_ReturnUrl: returnUrl,
       vnp_TxnRef: String(orderId),
     };

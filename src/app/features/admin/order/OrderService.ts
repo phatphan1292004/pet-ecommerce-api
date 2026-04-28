@@ -67,7 +67,7 @@ export class AdminOrderService {
   private cartRepo = AppDataSource.getMongoRepository(Cart);
   private customerRepo = AppDataSource.getMongoRepository(Customer);
 
-  async getOrders(query: AdminOrderListQuery = {}): Promise<AdminOrderListResponse> {
+  async  getOrders(query: AdminOrderListQuery = {}): Promise<AdminOrderListResponse> {
     const where: Record<string, string> = {};
 
     if (query.status?.trim()) {

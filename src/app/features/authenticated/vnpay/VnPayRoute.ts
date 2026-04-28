@@ -201,6 +201,7 @@ router.get("/payment_ipn", async (req: Request, res: Response) => {
 
     if (isSuccess) {
       order.isPaid = true;
+      order.status = "confirmed";
       await orderRepo.save(order);
     }
 

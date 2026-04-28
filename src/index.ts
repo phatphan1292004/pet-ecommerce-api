@@ -56,6 +56,9 @@ const startServer = async (): Promise<void> => {
   app.listen(PORT, () => {
     logger.info(`🚀 Server is running on port ${PORT}`);
     logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    logger.info(`env : =====================================`);
+    logger.info(`PORT: ${process.env.VNP_TMNCODE}`);
+    logger.info(`VNP_HASHSECRET: ${process.env.VNP_HASHSECRET}`);
   });
 };
 

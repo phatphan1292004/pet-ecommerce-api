@@ -221,3 +221,51 @@ export const verifyPayment = (req: Request): VerifyPaymentResponse => {
     orderId: vnp_Params["vnp_TxnRef"],
   };
 };
+
+export const verifyIPN = (req: Request): VerifyPaymentResponse => {
+  const secretKey = process.env.VNP_HASHSECRET;
+
+  if (!secretKey) {
+    throw new Error("VnPay configuration missing");
+  }
+
+  const vnp_Params: Record<string, string> = {};
+
+  // IPN may send params in body (POST) or query (GET)
+  const source = req.method === 'POST' && req.body && Object.keys(req.body).length > 0 ? req.body : req.query;
+
+  for (const [key, value] of Object.entries(source as Record<string, any>)) {
+    if (Array.isArray(value)) {
+      if (value[0] !== undefined) {
+        vnp_Params[key] = String(value[0]);
+      }
+    } else if (value !== undefined) {
+      vnp_Params[key] = String(value);
+    }
+  }
+
+  const secureHash = vnp_Params['vnp_SecureHash'];
+
+  // remove hash keys before verifying
+  delete vnp_Params['vnp_SecureHash'];
+  delete vnp_Params['vnp_SecureHashType'];
+
+  const signData = getSignData(vnp_Params);
+  const hmac = crypto.createHmac('sha512', secretKey);
+  const signed = hmac.update(signData, 'utf-8').digest('hex');
+  const normalizedSecureHash = String(secureHash || '').toLowerCase();
+  const isValidSignature = normalizedSecureHash === signed.toLowerCase();
+
+  if (!isValidSignature) {
+    console.error('VnPay IPN signature mismatch', { secureHash, signed, signData });
+    return { isValid: false };
+  }
+
+  const responseCode = vnp_Params['vnp_ResponseCode'];
+
+  return {
+    isValid: true,
+    responseCode,
+    orderId: vnp_Params['vnp_TxnRef'],
+  };
+};

@@ -4,11 +4,6 @@ import { ProductService } from './ProductService';
 const router = Router();
 const productService = new ProductService();
 
-/**
- * GET /products/search
- * Search products by query `q` across name/slug/description
- * Example: /products/search?q=chon+thuc+an&page=1&limit=12&sortBy=priceAsc
- */
 router.get('/products/search', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parseNumber = (value: unknown): number | undefined => {
@@ -42,11 +37,7 @@ router.get('/products/search', async (req: Request, res: Response, next: NextFun
   }
 });
 
-/**
- * GET /products/latest
- * Get 10 latest active products
- * NOTE: This route must be defined BEFORE :slug route to avoid conflicts
- */
+
 router.get('/products/latest', async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const products = await productService.getLatestProducts();
@@ -60,11 +51,32 @@ router.get('/products/latest', async (_req: Request, res: Response, next: NextFu
   }
 });
 
-/**
- * GET /products/subcategory/:subCategoryId
- * Get active products by subcategory ID
- * NOTE: This route must be defined BEFORE :slug route to avoid conflicts
- */
+router.get('/products/popular', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const products = await productService.getPopularProducts();
+    res.json({
+      success: true,
+      data: products,
+      count: products.length
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/products/best-selling', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const products = await productService.getBestSellingProducts();
+    res.json({
+      success: true,
+      data: products,
+      count: products.length
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/products/subcategory/:subCategoryId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const subCategoryId = req.params.subCategoryId as string;
@@ -80,12 +92,6 @@ router.get('/products/subcategory/:subCategoryId', async (req: Request, res: Res
   }
 });
 
-/**
- * GET /products/filter
- * Filter active products by multiple criteria
- * Example:
- * /products/filter?subcategoryIds=id1,id2&brandIds=id3,id4&origins=Vi%E1%BB%87t%20Nam,Ph%C3%A1p&minPrice=100000&maxPrice=800000&sortBy=priceAsc&page=1&limit=12
- */
 router.get('/products/filter', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parseCsvParam = (value: unknown): string[] => {
@@ -135,17 +141,13 @@ router.get('/products/filter', async (req: Request, res: Response, next: NextFun
   }
 });
 
-/**
- * GET /products/:slug
- * Get product detail by slug
- */
 router.get('/products/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const slug = req.params.slug as string;
     const customerId = typeof req.query.customerId === 'string' ? req.query.customerId : undefined;
     
     // Prevent matching static routes
-    if (slug === 'latest' || slug === 'filter') {
+    if (slug === 'latest' || slug === 'filter' || slug === 'popular' || slug === 'best-selling') {
       return next();
     }
 

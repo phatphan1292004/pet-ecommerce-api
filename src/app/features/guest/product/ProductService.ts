@@ -2,6 +2,7 @@ import { AppDataSource } from '@/app/database';
 import { Category } from '@/app/entities/Categories';
 import { Favorite } from '@/app/entities/Favorite';
 import { Product } from '@/app/entities/Product';
+import { Cart } from '@/app/entities/Cart';
 import { NotFoundError, BadRequestError } from '@/app/exceptions/AppError';
 import { ObjectId } from 'mongodb';
 
@@ -54,6 +55,7 @@ export class ProductService {
   private repo = AppDataSource.getMongoRepository(Product);
   private categoryRepo = AppDataSource.getMongoRepository(Category);
   private favoriteRepo = AppDataSource.getMongoRepository(Favorite);
+  private cartRepo = AppDataSource.getMongoRepository(Cart);
   private brandNameByIdCache: Map<string, string> | null = null;
   private brandCacheExpiresAt = 0;
   private readonly brandCacheTtlMs = 5 * 60 * 1000;
@@ -69,6 +71,65 @@ export class ProductService {
     });
 
     return products.map(this.toProductResponse);
+  }
+
+  /**
+   * Get most favorited products (popular)
+   */
+  async getPopularProducts(limit = 10): Promise<ProductResponse[]> {
+    const pipeline = [
+      { $unwind: '$products' },
+      { $group: { _id: '$products', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: limit },
+      { $lookup: { from: 'products', localField: '_id', foreignField: '_id', as: 'product' } },
+      { $unwind: '$product' },
+      { $replaceRoot: { newRoot: '$product' } }
+    ];
+
+    const aggregateResult = await (this.favoriteRepo as any).aggregate(pipeline).toArray();
+
+    if (!Array.isArray(aggregateResult) || aggregateResult.length === 0) {
+      return [];
+    }
+
+    return aggregateResult.map((p: Product) => this.toProductResponse(p));
+  }
+
+  /**
+   * Get best-selling products by summing quantities from non-open carts
+   */
+  async getBestSellingProducts(limit = 10): Promise<ProductResponse[]> {
+    const pipeline = [
+      { $match: { status: 'close', products: { $exists: true, $ne: [] } } },
+      { $unwind: '$products' },
+      { $group: { _id: '$products.productId', quantity: { $sum: '$products.quantity' } } },
+      { $sort: { quantity: -1 } },
+      { $limit: limit }
+    ];
+
+    const aggregateResult = await (this.cartRepo as any).aggregate(pipeline).toArray() as Array<{ _id: string; quantity: number }>;
+
+    const ids = (aggregateResult || [])
+      .map((r) => (typeof r._id === 'string' ? r._id : String(r._id)))
+      .filter((id) => ObjectId.isValid(id))
+      .map((id) => new ObjectId(id));
+
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const products = await this.repo.find({
+      where: { _id: { $in: ids }, is_active: true }
+    });
+
+    const productMap = new Map(products.map((p) => [p._id.toHexString(), p]));
+
+    const ordered: Product[] = ids
+      .map((oid) => productMap.get(oid.toHexString()))
+      .filter((p): p is Product => !!p);
+
+    return ordered.map(this.toProductResponse);
   }
 
   /**

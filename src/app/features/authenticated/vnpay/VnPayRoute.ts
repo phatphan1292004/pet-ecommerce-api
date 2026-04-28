@@ -64,7 +64,7 @@ router.get("/payment_return", (req: Request, res: Response) => {
   }
 });
 
-router.post('/payment_ipn', async (req: Request, res: Response) => {
+router.get('/payment_ipn', async (req: Request, res: Response) => {
   try {
     const result = verifyIPN(req);
 

@@ -95,8 +95,9 @@ router.get('/payment_ipn', async (req: Request, res: Response) => {
       if (order) {
         if (isSuccess) {
           order.isPaid = true;
-          // use 'close' as completed status as used elsewhere in admin/dashboard
           order.status = 'confirmed';
+        }else {
+          order.status = 'failed';
         }
         await orderRepo.save(order);
       }

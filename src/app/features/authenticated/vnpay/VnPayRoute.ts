@@ -121,7 +121,7 @@ router.post("/create_payment", (req: Request, res: Response) => {
           ...sortedParams,
           vnp_SecureHash: secureHash,
         },
-        { encode: true } // 🔥 QUAN TRỌNG
+        { encode: true }
       );
 
     return res.json({ paymentUrl });

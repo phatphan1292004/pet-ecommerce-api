@@ -52,6 +52,12 @@ export class Product {
   };
 
   @Column()
+  usage: string;
+
+  @Column() 
+  ingredients: string;
+
+  @Column()
   stock: number;
 
   @Column()

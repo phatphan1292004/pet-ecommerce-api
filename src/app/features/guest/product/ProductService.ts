@@ -48,6 +48,8 @@ export interface ProductDetailResponse extends ProductResponse {
   is_active: boolean;
   specifications: any;
   benefits: any;
+  usage?: string;
+  ingredients?: string;
   created_at: Date;
 }
 
@@ -350,6 +352,8 @@ export class ProductService {
       is_active: product.is_active,
       specifications: product.specifications,
       benefits: product.benefits,
+      usage: product.usage,
+      ingredients: product.ingredients,
       created_at: product.created_at
     };
   }

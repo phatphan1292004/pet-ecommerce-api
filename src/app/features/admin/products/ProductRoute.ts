@@ -94,20 +94,20 @@ router.get('/admin/products/:id', async (req: Request, res: Response, next: Next
   }
 });
 
-router.post('/admin/products', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const payload = req.body as AdminCreateProductPayload;
-    const product = await adminProductService.createProduct(payload);
+  router.post('/admin/products', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const payload = req.body as AdminCreateProductPayload;
+      const product = await adminProductService.createProduct(payload);
 
-    res.status(201).json({
-      success: true,
-      message: 'Product created successfully',
-      data: product,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
+      res.status(201).json({
+        success: true,
+        message: 'Product created successfully',
+        data: product,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
 
 router.put('/admin/products/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {

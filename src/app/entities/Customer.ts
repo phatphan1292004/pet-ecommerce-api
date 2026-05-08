@@ -30,6 +30,12 @@ export class Customer {
   @Column({ nullable: true })
   role?: ObjectId | string;
 
+  @Column('double', { array: true, nullable: true })
+  profileEmbedding?: number[];
+
+  @Column('double', { nullable: true })
+  profileEmbeddingWeight?: number;
+
   @Column({ default: false })
   isLocked: boolean;
 

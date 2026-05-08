@@ -51,6 +51,61 @@ npm run build
 npm start
 ```
 
+## Embedding
+
+Project hiện lấy embedding từ Google AI Studio Gemini API và dùng cho content-based recommendation.
+
+Thiết lập một trong các biến môi trường sau:
+- `GEMINI_API_KEY`
+- `GOOGLE_AI_STUDIO_API_KEY`
+
+Nếu muốn đổi model embedding, set thêm `GEMINI_EMBEDDING_MODEL`.
+
+## Content-Based Recommendation Flow
+
+Luồng đang chạy theo hướng "user xem nhiều sản phẩm -> tạo profile vector -> dùng vector đó để tìm sản phẩm phù hợp".
+
+1. Frontend gọi endpoint track khi user xem hoặc click sản phẩm.
+2. Backend lưu activity vào `product_activities`.
+3. Backend lấy embedding của sản phẩm vừa track và cập nhật dần vào `customers.profileEmbedding`.
+4. Khi cần gợi ý, backend dùng `profileEmbedding` của customer để tính cosine similarity với embedding của các sản phẩm active.
+5. Nếu customer chưa có profile vector đủ dữ liệu, backend fallback sang lịch sử activity gần nhất để build tạm profile vector.
+
+### API đang dùng
+
+- `POST /products/track`
+- `GET /products/recommendations?customerId=...&limit=10&historyLimit=20`
+- `GET /products/:slug?customerId=...` sẽ tự track view khi user mở trang chi tiết sản phẩm.
+
+### Frontend sử dụng như nào
+
+Khi user mở trang chi tiết hoặc click vào một sản phẩm:
+
+```ts
+await fetch('/products/track', {
+	method: 'POST',
+	headers: {
+		'Content-Type': 'application/json',
+	},
+	body: JSON.stringify({
+		customerId,
+		productId,
+		action: 'view',
+	}),
+});
+```
+
+Khi render khối "Sản phẩm gợi ý cho bạn":
+
+```ts
+const response = await fetch(
+	`/products/recommendations?customerId=${customerId}&limit=10&historyLimit=20`
+);
+const result = await response.json();
+```
+
+Frontend chỉ cần gửi `customerId` ổn định của user đang đăng nhập. Nếu muốn gợi ý theo click mạnh hơn, truyền `action: 'click'`; còn mở chi tiết sản phẩm thì dùng `action: 'view'`.
+
 ## API Endpoints
 
 ### Health Check

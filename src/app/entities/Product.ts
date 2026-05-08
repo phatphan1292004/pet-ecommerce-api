@@ -66,6 +66,9 @@ export class Product {
   @Column('text', { array: true })
   images: string[];
 
+  @Column('double', { array: true, nullable: true })
+  embedding?: number[];
+
   @Column({ default: true })
   is_active: boolean;
 

@@ -15,13 +15,29 @@ import { Brand } from '../entities/Brand';
 import { Role } from '../entities/Role';
 import { Coupon } from '../entities/Coupon';
 import { Favorite } from '../entities/Favorite';
+import { ProductActivity } from '../entities/ProductActivity';
 
 export const AppDataSource = new DataSource({
   type: 'mongodb',
   url: config.mongodb.uri,
   synchronize: false,
   logging: config.env !== 'production',
-  entities: [Customer, Category, Product, Province, Ward, Address, Cart, Order, Review, Brand, Role, Coupon, Favorite],
+  entities: [
+    Customer,
+    Category,
+    Product,
+    Province,
+    Ward,
+    Address,
+    Cart,
+    Order,
+    Review,
+    Brand,
+    Role,
+    Coupon,
+    Favorite,
+    ProductActivity,
+  ],
 });
   
 export const connectDatabase = async (): Promise<void> => {

@@ -3,6 +3,7 @@ import { Brand } from '@/app/entities/Brand';
 import { Category } from '@/app/entities/Categories';
 import { Product } from '@/app/entities/Product';
 import { BadRequestError, ConflictError, NotFoundError } from '@/app/exceptions/AppError';
+import { getEmbeddingFromValues } from '@/app/utils/contentEmbedding';
 import { ObjectId } from 'mongodb';
 
 type NumberInput = number | string;
@@ -227,6 +228,8 @@ export class AdminProductService {
       review: this.parseOptionalNumber(payload.review, 'review') ?? 0,
     });
 
+    product.embedding = await this.buildEmbedding(product);
+
     const savedProduct = await this.productRepo.save(product);
     const relationLookup = await this.buildProductRelationLookup([savedProduct]);
     return this.toAdminProductResponse(
@@ -355,6 +358,8 @@ export class AdminProductService {
       const review = this.parseOptionalNumber(payload.review, 'review');
       product.review = review ?? 0;
     }
+
+    product.embedding = await this.buildEmbedding(product);
 
     const savedProduct = await this.productRepo.save(product);
     const relationLookup = await this.buildProductRelationLookup([savedProduct]);
@@ -573,6 +578,111 @@ export class AdminProductService {
       default:
         return bCreatedAt - aCreatedAt;
     }
+  }
+
+  private async buildEmbedding(product: Product): Promise<number[]> {
+    const brandName = await this.findBrandNameForEmbedding(product.brand);
+    const subCategoryContext = await this.findSubCategoryContextForEmbedding(product.subcategories);
+
+    const parts: string[] = [];
+
+    if (product.name) {
+      parts.push(`Ten: ${product.name}`);
+    }
+
+    if (product.description) {
+      parts.push(`Mo ta: ${product.description}`);
+    }
+
+    if (product.longDescription) {
+      parts.push(`Chi tiet: ${product.longDescription}`);
+    }
+
+    if (product.usage) {
+      parts.push(`Huong dan: ${product.usage}`);
+    }
+
+    if (product.ingredients) {
+      parts.push(`Thanh phan: ${product.ingredients}`);
+    }
+
+    if (product.specifications && typeof product.specifications === 'object') {
+      const specs = Object.entries(product.specifications)
+        .filter(([, value]) => Boolean(value))
+        .map(([key, value]) => `${key}: ${value}`)
+        .join('; ');
+
+      if (specs) {
+        parts.push(`Thong so: ${specs}`);
+      }
+    }
+
+    if (product.benefits && typeof product.benefits === 'object') {
+      const benefits = Object.entries(product.benefits)
+        .filter(([, value]) => Boolean(value))
+        .map(([key, value]) => `${key}: ${value}`)
+        .join('; ');
+
+      if (benefits) {
+        parts.push(`Loi ich: ${benefits}`);
+      }
+    }
+
+    if (brandName) {
+      parts.push(`Thuong hieu: ${brandName}`);
+    }
+
+    if (subCategoryContext.subCategoryName) {
+      parts.push(`Danh muc con: ${subCategoryContext.subCategoryName}`);
+    }
+
+    if (subCategoryContext.categoryName) {
+      parts.push(`Nhom danh muc: ${subCategoryContext.categoryName}`);
+    }
+
+    return getEmbeddingFromValues(parts);
+  }
+
+  private async findBrandNameForEmbedding(brandValue: unknown): Promise<string | undefined> {
+    const brandId = this.toObjectId(brandValue);
+    if (!brandId) {
+      return undefined;
+    }
+
+    const brand = await this.brandRepo.findOne({ where: { _id: brandId } });
+    const normalizedName = brand?.name?.trim();
+    return normalizedName || undefined;
+  }
+
+  private async findSubCategoryContextForEmbedding(subCategoryValue: unknown): Promise<{
+    subCategoryName?: string;
+    categoryName?: string;
+  }> {
+    const subCategoryId = this.toObjectId(subCategoryValue);
+    if (!subCategoryId) {
+      return {};
+    }
+
+    const category = await this.categoryRepo.findOne({
+      where: { 'subcategories._id': subCategoryId },
+    });
+
+    if (!category) {
+      return {};
+    }
+
+    const targetSubCategoryId = subCategoryId.toHexString();
+    const matchedSubCategory = (category.subcategories ?? []).find(
+      (subCategory) => this.getObjectIdString(subCategory._id) === targetSubCategoryId,
+    );
+
+    const subCategoryName = matchedSubCategory?.name?.trim();
+    const categoryName = category.name?.trim();
+
+    return {
+      subCategoryName: subCategoryName || undefined,
+      categoryName: categoryName || undefined,
+    };
   }
 
   private getCreatedAtTimestamp(value: unknown): number {

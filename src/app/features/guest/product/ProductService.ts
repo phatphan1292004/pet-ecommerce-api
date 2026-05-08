@@ -1,9 +1,12 @@
 import { AppDataSource } from '@/app/database';
 import { Category } from '@/app/entities/Categories';
+import { Customer } from '@/app/entities/Customer';
 import { Favorite } from '@/app/entities/Favorite';
 import { Product } from '@/app/entities/Product';
+import { ProductActivity, ProductActivityAction } from '@/app/entities/ProductActivity';
 import { Cart } from '@/app/entities/Cart';
 import { NotFoundError, BadRequestError } from '@/app/exceptions/AppError';
+import { getEmbeddingFromValues, cosineSimilarity } from '@/app/utils/contentEmbedding';
 import { ObjectId } from 'mongodb';
 
 export interface ProductResponse {
@@ -15,6 +18,7 @@ export interface ProductResponse {
   discount: number;
   review: number;
   image: string;
+  subcategoryId?: string;
 }
 
 export interface ProductFilterParams {
@@ -56,8 +60,10 @@ export interface ProductDetailResponse extends ProductResponse {
 export class ProductService {
   private repo = AppDataSource.getMongoRepository(Product);
   private categoryRepo = AppDataSource.getMongoRepository(Category);
+  private customerRepo = AppDataSource.getMongoRepository(Customer);
   private favoriteRepo = AppDataSource.getMongoRepository(Favorite);
   private cartRepo = AppDataSource.getMongoRepository(Cart);
+  private activityRepo = AppDataSource.getMongoRepository(ProductActivity);
   private brandNameByIdCache: Map<string, string> | null = null;
   private brandCacheExpiresAt = 0;
   private readonly brandCacheTtlMs = 5 * 60 * 1000;
@@ -173,6 +179,198 @@ export class ProductService {
     const isFavorite = await this.isProductInFavorite(product._id, customerId);
 
     return this.toProductDetailResponse(product, brandName, isFavorite);
+  }
+
+  async trackProductActivity(
+    customerId: string,
+    productId: string,
+    action: ProductActivityAction,
+  ): Promise<void> {
+    const normalizedCustomerId = customerId?.trim();
+    if (!normalizedCustomerId) {
+      throw new BadRequestError('customerId is required');
+    }
+
+    if (!ObjectId.isValid(productId)) {
+      throw new BadRequestError('Invalid productId format');
+    }
+
+    if (action !== 'view' && action !== 'click') {
+      throw new BadRequestError('action must be view or click');
+    }
+
+    const activity = this.activityRepo.create({
+      customerId: normalizedCustomerId,
+      productId: productId.trim(),
+      action,
+    });
+
+    await this.activityRepo.save(activity);
+
+    const trackedProduct = await this.repo.findOne({
+      where: { _id: new ObjectId(productId), is_active: true },
+    });
+
+    if (!trackedProduct) {
+      console.warn(`[trackProductActivity] Product not found: ${productId}`);
+      return;
+    }
+
+    const embedding = trackedProduct.embedding ?? (await this.buildEmbedding(trackedProduct));
+    if (embedding.length === 0) {
+      console.warn(`[trackProductActivity] No embedding for product: ${productId}`);
+      return;
+    }
+
+    console.log(`[trackProductActivity] Updating profile for customer: ${normalizedCustomerId}, action: ${action}`);
+    await this.updateCustomerProfileEmbedding(normalizedCustomerId, embedding, action === 'click' ? 2 : 1);
+  }
+
+  async getRecommendedProductsForCustomer(
+    customerId: string,
+    limit = 10,
+    historyLimit = 20,
+  ): Promise<ProductResponse[]> {
+    const normalizedCustomerId = customerId?.trim();
+    if (!normalizedCustomerId) {
+      throw new BadRequestError('customerId is required');
+    }
+
+    const cappedHistory = Math.max(1, Math.min(historyLimit, 50));
+    const cappedLimit = Math.max(1, Math.min(limit, 20));
+
+    const customer = await this.customerRepo.findOne({
+      where: { firebaseUid: normalizedCustomerId },
+    });
+
+    const storedProfileEmbedding = customer?.profileEmbedding ?? [];
+    const hasStoredProfileEmbedding = storedProfileEmbedding.length > 0;
+
+    const activities = await this.activityRepo.find({
+      where: { customerId: normalizedCustomerId },
+      order: { createdAt: 'DESC' },
+      take: cappedHistory,
+    });
+
+    if (activities.length === 0) {
+      return [];
+    }
+
+    const productWeights = new Map<string, number>();
+    for (const activity of activities) {
+      const weight = activity.action === 'click' ? 2 : 1;
+      productWeights.set(
+        activity.productId,
+        (productWeights.get(activity.productId) ?? 0) + weight,
+      );
+    }
+
+    const historyIds = [...productWeights.keys()].filter((id) => ObjectId.isValid(id));
+    if (historyIds.length === 0) {
+      return [];
+    }
+
+    const historyObjectIds = historyIds.map((id) => new ObjectId(id));
+    const historyProducts = await this.repo.find({
+      where: { _id: { $in: historyObjectIds }, is_active: true },
+    });
+
+    const historyEmbeddings = historyProducts
+      .map((product) => {
+        if (!product.embedding || product.embedding.length === 0) {
+          return null;
+        }
+
+        const weight = productWeights.get(product._id.toHexString()) ?? 1;
+        return { embedding: product.embedding, weight };
+      })
+      .filter((item): item is { embedding: number[]; weight: number } => !!item);
+
+    const profileEmbedding = hasStoredProfileEmbedding
+      ? storedProfileEmbedding
+      : this.buildProfileEmbedding(historyEmbeddings);
+
+    if (profileEmbedding.length === 0) {
+      return [];
+    }
+
+    if (!hasStoredProfileEmbedding && historyEmbeddings.length > 0) {
+      await this.persistCustomerProfileEmbedding(normalizedCustomerId, profileEmbedding, historyEmbeddings);
+    }
+
+    const excludeIds = historyProducts.map((product) => product._id);
+    const match: Record<string, unknown> = {
+      _id: { $nin: excludeIds },
+      is_active: true,
+    };
+
+    const candidates = await this.repo.find({ where: match, take: 400 });
+
+    const scored = candidates
+      .map((candidate) => {
+        if (!candidate.embedding || candidate.embedding.length === 0) {
+          return null;
+        }
+
+        return {
+          product: candidate,
+          score: cosineSimilarity(profileEmbedding, candidate.embedding),
+        };
+      })
+      .filter((item): item is { product: Product; score: number } => !!item && item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, cappedLimit);
+
+    return scored.map((item) => this.toProductResponse(item.product));
+  }
+
+  /**
+   * Recommend products based on content similarity
+   */
+  async getRecommendedProducts(productId: string, limit = 10): Promise<ProductResponse[]> {
+    if (!ObjectId.isValid(productId)) {
+      throw new BadRequestError('Invalid productId format');
+    }
+
+    const baseProduct = await this.repo.findOne({
+      where: { _id: new ObjectId(productId), is_active: true }
+    });
+
+    if (!baseProduct) {
+      throw new NotFoundError('Product not found');
+    }
+
+    const baseEmbedding = baseProduct.embedding ?? (await this.buildEmbedding(baseProduct));
+    if (baseEmbedding.length === 0) {
+      return [];
+    }
+
+    const cappedLimit = Math.max(1, Math.min(limit, 20));
+    const candidates = await this.repo.find({
+      where: {
+        _id: { $ne: baseProduct._id },
+        is_active: true,
+      },
+      take: 500
+    });
+
+    const scored = candidates
+      .map((candidate) => {
+        if (!candidate.embedding || candidate.embedding.length === 0) {
+          return null;
+        }
+
+        const score = cosineSimilarity(baseEmbedding, candidate.embedding);
+        return {
+          product: candidate,
+          score,
+        };
+      })
+      .filter((item): item is { product: Product; score: number } => !!item && item.score > 0.1)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, cappedLimit);
+
+    return scored.map((item) => this.toProductResponse(item.product));
   }
 
   /**
@@ -325,7 +523,8 @@ export class ProductService {
       originalPrice: product.originalPrice,
       discount: product.discount,
       review: product.review,
-      image: product.images && product.images.length > 0 ? product.images[0] : ''
+      image: product.images && product.images.length > 0 ? product.images[0] : '',
+      subcategoryId: product.subcategories?.toHexString?.()
     };
   }
 
@@ -390,6 +589,129 @@ export class ProductService {
 
   private escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private async buildEmbedding(product: Product): Promise<number[]> {
+    const brandName = await this.findBrandNameForEmbedding(product.brand);
+    const subCategoryContext = await this.findSubCategoryContextForEmbedding(product.subcategories);
+
+    const parts: string[] = [];
+
+    // Tên sản phẩm
+    if (product.name) {
+      parts.push(`Tên: ${product.name}`);
+    }
+
+    // Mô tả ngắn
+    if (product.description) {
+      parts.push(`Mô tả: ${product.description}`);
+    }
+
+    // Mô tả chi tiết
+    if (product.longDescription) {
+      parts.push(`Chi tiết: ${product.longDescription}`);
+    }
+
+    // Cách dùng
+    if (product.usage) {
+      parts.push(`Hướng dẫn: ${product.usage}`);
+    }
+
+    // Thành phần
+    if (product.ingredients) {
+      parts.push(`Thành phần: ${product.ingredients}`);
+    }
+
+    // Thông số kỹ thuật
+    if (product.specifications && typeof product.specifications === 'object') {
+      const specs = Object.entries(product.specifications)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('; ');
+      if (specs) {
+        parts.push(`Thông số: ${specs}`);
+      }
+    }
+
+    // Lợi ích
+    if (product.benefits && typeof product.benefits === 'object') {
+      const benefits = Object.entries(product.benefits)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join('; ');
+      if (benefits) {
+        parts.push(`Lợi ích: ${benefits}`);
+      }
+    }
+
+    // Thương hiệu và danh mục
+    if (brandName) {
+      parts.push(`Thương hiệu: ${brandName}`);
+    }
+
+    if (subCategoryContext.subCategoryName) {
+      parts.push(`Danh mục con: ${subCategoryContext.subCategoryName}`);
+    }
+
+    if (subCategoryContext.categoryName) {
+      parts.push(`Nhóm danh mục: ${subCategoryContext.categoryName}`);
+    }
+
+    return getEmbeddingFromValues(parts);
+  }
+
+  private toObjectId(value: unknown): ObjectId | undefined {
+    if (value instanceof ObjectId) {
+      return value;
+    }
+
+    if (typeof value === 'string' && ObjectId.isValid(value)) {
+      return new ObjectId(value);
+    }
+
+    return undefined;
+  }
+
+  private async findBrandNameForEmbedding(brandValue: unknown): Promise<string | undefined> {
+    const brandId = this.toObjectId(brandValue);
+    if (!brandId) {
+      return undefined;
+    }
+
+    await this.ensureBrandCache();
+    const normalized = this.brandNameByIdCache?.get(brandId.toHexString())?.trim();
+    return normalized || undefined;
+  }
+
+  private async findSubCategoryContextForEmbedding(subCategoryValue: unknown): Promise<{
+    subCategoryName?: string;
+    categoryName?: string;
+  }> {
+    const subCategoryId = this.toObjectId(subCategoryValue);
+    if (!subCategoryId) {
+      return {};
+    }
+
+    const category = await this.categoryRepo.findOne({
+      where: { 'subcategories._id': subCategoryId },
+    });
+
+    if (!category) {
+      return {};
+    }
+
+    const subCategoryHex = subCategoryId.toHexString();
+    const matchedSubCategory = (category.subcategories ?? []).find(
+      (subCategory) => subCategory._id.toHexString() === subCategoryHex,
+    );
+
+    const subCategoryName = matchedSubCategory?.name?.trim();
+    const categoryName = category.name?.trim();
+
+    return {
+      subCategoryName: subCategoryName || undefined,
+      categoryName: categoryName || undefined,
+    };
   }
 
   private async isProductInFavorite(productId: ObjectId, customerId?: string): Promise<boolean> {
@@ -465,5 +787,108 @@ export class ProductService {
 
     this.brandNameByIdCache = cache;
     this.brandCacheExpiresAt = now + this.brandCacheTtlMs;
+  }
+
+  private buildProfileEmbedding(
+    embeddings: Array<{ embedding: number[]; weight: number }>,
+  ): number[] {
+    if (embeddings.length === 0) {
+      return [];
+    }
+
+    const length = embeddings[0].embedding.length;
+    const combined = new Array(length).fill(0);
+    let totalWeight = 0;
+
+    for (const { embedding, weight } of embeddings) {
+      for (let i = 0; i < length; i += 1) {
+        combined[i] += (embedding[i] ?? 0) * weight;
+      }
+      totalWeight += weight;
+    }
+
+    if (!totalWeight) {
+      return [];
+    }
+
+    for (let i = 0; i < length; i += 1) {
+      combined[i] = combined[i] / totalWeight;
+    }
+
+    return this.normalizeVector(combined);
+  }
+
+  private async persistCustomerProfileEmbedding(
+    customerId: string,
+    embedding: number[],
+    embeddings: Array<{ embedding: number[]; weight: number }>,
+  ): Promise<void> {
+    const customer = await this.customerRepo.findOne({
+      where: { firebaseUid: customerId },
+    });
+
+    if (!customer) {
+      return;
+    }
+
+    const totalWeight = embeddings.reduce((sum, item) => sum + item.weight, 0);
+    customer.profileEmbedding = embedding;
+    customer.profileEmbeddingWeight = totalWeight;
+
+    await this.customerRepo.save(customer);
+  }
+
+  private async updateCustomerProfileEmbedding(
+    customerId: string,
+    embedding: number[],
+    weight: number,
+  ): Promise<void> {
+    const customer = await this.customerRepo.findOne({
+      where: { firebaseUid: customerId },
+    });
+
+    if (!customer) {
+      console.warn(`[updateCustomerProfileEmbedding] Customer not found for firebaseUid: ${customerId}`);
+      return;
+    }
+
+    console.log(`[updateCustomerProfileEmbedding] Found customer ${customer._id}, updating embedding`);
+
+    const normalizedWeight = Math.max(1, weight);
+    const existingEmbedding = customer.profileEmbedding ?? [];
+    const existingWeight = customer.profileEmbeddingWeight ?? 0;
+
+    if (existingEmbedding.length === 0 || existingWeight <= 0) {
+      customer.profileEmbedding = this.normalizeVector(embedding);
+      customer.profileEmbeddingWeight = normalizedWeight;
+      await this.customerRepo.save(customer);
+      console.log(`[updateCustomerProfileEmbedding] Saved initial embedding for customer ${customer._id}`);
+      return;
+    }
+
+    const nextLength = Math.max(existingEmbedding.length, embedding.length);
+    const combined = new Array(nextLength).fill(0);
+    const totalWeight = existingWeight + normalizedWeight;
+
+    for (let i = 0; i < nextLength; i += 1) {
+      const currentValue = existingEmbedding[i] ?? 0;
+      const incomingValue = embedding[i] ?? 0;
+      combined[i] = ((currentValue * existingWeight) + (incomingValue * normalizedWeight)) / totalWeight;
+    }
+
+    customer.profileEmbedding = this.normalizeVector(combined);
+    customer.profileEmbeddingWeight = totalWeight;
+
+    await this.customerRepo.save(customer);
+    console.log(`[updateCustomerProfileEmbedding] Updated embedding for customer ${customer._id}, totalWeight: ${totalWeight}`);
+  }
+
+  private normalizeVector(vector: number[]): number[] {
+    const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+    if (!norm) {
+      return [];
+    }
+
+    return vector.map((value) => value / norm);
   }
 }

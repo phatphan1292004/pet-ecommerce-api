@@ -141,6 +141,56 @@ router.get('/products/filter', async (req: Request, res: Response, next: NextFun
   }
 });
 
+router.get('/products/recommendations', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parseNumber = (value: unknown): number | undefined => {
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        return undefined;
+      }
+
+      const parsedValue = Number(value);
+      return Number.isFinite(parsedValue) ? parsedValue : undefined;
+    };
+
+    const customerId = typeof req.query.customerId === 'string' ? req.query.customerId : '';
+    const limit = parseNumber(req.query.limit) ?? 10;
+    const historyLimit = parseNumber(req.query.historyLimit) ?? 20;
+
+    const products = await productService.getRecommendedProductsForCustomer(
+      customerId,
+      limit,
+      historyLimit,
+    );
+
+    res.json({
+      success: true,
+      data: products,
+      count: products.length
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/products/track', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { customerId, productId, action } = req.body as {
+      customerId?: string;
+      productId?: string;
+      action?: 'view' | 'click';
+    };
+
+    await productService.trackProductActivity(customerId ?? '', productId ?? '', action ?? 'view');
+
+    res.json({
+      success: true,
+      message: 'Activity tracked successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/products/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const slug = req.params.slug as string;
@@ -152,6 +202,10 @@ router.get('/products/:slug', async (req: Request, res: Response, next: NextFunc
     }
 
     const product = await productService.getProductBySlug(slug, customerId);
+
+    if (customerId) {
+      await productService.trackProductActivity(customerId, product._id.toHexString(), 'view');
+    }
     res.json({
       success: true,
       data: product

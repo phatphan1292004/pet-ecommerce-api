@@ -63,6 +63,12 @@ export class Product {
   @Column()
   shipping: string;
 
+  @Column({ default: 'both' })
+  species: 'dog' | 'cat' | 'both';
+
+  @Column('text', { array: true, default: [] })
+  tags: string[];
+
   @Column('text', { array: true })
   images: string[];
 

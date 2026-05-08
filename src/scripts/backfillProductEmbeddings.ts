@@ -11,6 +11,23 @@ type SubCategoryContext = {
   categoryName?: string;
 };
 
+const normalizeStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === 'string' ? item.trim() : ''))
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
 const getObjectIdString = (value: unknown): string | undefined => {
   if (value instanceof ObjectId) {
     return value.toHexString();
@@ -46,30 +63,22 @@ const buildEmbedding = async (
     parts.push(`Mô tả: ${product.description}`);
   }
 
-  if (product.longDescription) {
-    parts.push(`Chi tiết: ${product.longDescription}`);
-  }
-
-  if (product.benefits && typeof product.benefits === 'object') {
-    const benefits = Object.entries(product.benefits)
-      .filter(([, value]) => Boolean(value))
-      .map(([key, value]) => `${key}: ${value}`)
-      .join('; ');
-
-    if (benefits) {
-      parts.push(`Lợi ích: ${benefits}`);
-    }
-  }
-
   const subCategoryId = getObjectIdString(product.subcategories);
   if (subCategoryId) {
     const subCategoryContext = subCategoryContextById.get(subCategoryId);
     if (subCategoryContext?.subCategoryName) {
       parts.push(`Danh mục con: ${subCategoryContext.subCategoryName}`);
     }
-    if (subCategoryContext?.categoryName) {
-      parts.push(`Nhóm danh mục: ${subCategoryContext.categoryName}`);
-    }
+  }
+
+  const tags = normalizeStringArray((product as { tags?: unknown }).tags);
+  if (tags.length > 0) {
+    parts.push(`Tags: ${tags.join(', ')}`);
+  }
+
+  const speciesValues = normalizeStringArray((product as { species?: unknown }).species);
+  if (speciesValues.length > 0) {
+    parts.push(`Species: ${speciesValues.join(', ')}`);
   }
 
   const finalText = parts.join('\n');

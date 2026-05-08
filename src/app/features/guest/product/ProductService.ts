@@ -6,7 +6,7 @@ import { Product } from '@/app/entities/Product';
 import { ProductActivity, ProductActivityAction } from '@/app/entities/ProductActivity';
 import { Cart } from '@/app/entities/Cart';
 import { NotFoundError, BadRequestError } from '@/app/exceptions/AppError';
-import { getEmbeddingFromValues, cosineSimilarity } from '@/app/utils/contentEmbedding';
+import { cosineSimilarity } from '@/app/utils/contentEmbedding';
 import { ObjectId } from 'mongodb';
 
 export interface ProductResponse {
@@ -216,7 +216,7 @@ export class ProductService {
       return;
     }
 
-    const embedding = trackedProduct.embedding ?? (await this.buildEmbedding(trackedProduct));
+    const embedding = trackedProduct.embedding ?? [];
     if (embedding.length === 0) {
       console.warn(`[trackProductActivity] No embedding for product: ${productId}`);
       return;
@@ -298,11 +298,49 @@ export class ProductService {
       await this.persistCustomerProfileEmbedding(normalizedCustomerId, profileEmbedding, historyEmbeddings);
     }
 
+    const historySubcategoryIds = [
+      ...new Set(
+        historyProducts
+          .map((product) => product.subcategories?.toHexString?.())
+          .filter((value): value is string => typeof value === 'string' && ObjectId.isValid(value)),
+      ),
+    ].map((value) => new ObjectId(value));
+
+    const historySpecies = [
+      ...new Set(historyProducts.map((product) => product.species).filter(Boolean)),
+    ] as Array<Product['species']>;
+
+    const historyTags = [
+      ...new Set(
+        historyProducts
+          .flatMap((product) => product.tags ?? [])
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    let speciesFilter: Array<Product['species']> | null = null;
+    if (historySpecies.length > 0 && !historySpecies.includes('both')) {
+      if (historySpecies.includes('dog') && !historySpecies.includes('cat')) {
+        speciesFilter = ['dog', 'both'];
+      } else if (historySpecies.includes('cat') && !historySpecies.includes('dog')) {
+        speciesFilter = ['cat', 'both'];
+      }
+    }
+
     const excludeIds = historyProducts.map((product) => product._id);
     const match: Record<string, unknown> = {
       _id: { $nin: excludeIds },
       is_active: true,
     };
+
+    if (historySubcategoryIds.length > 0) {
+      match.subcategories = { $in: historySubcategoryIds };
+    }
+
+    if (speciesFilter) {
+      match.species = { $in: speciesFilter };
+    }
 
     const candidates = await this.repo.find({ where: match, take: 400 });
 
@@ -314,7 +352,7 @@ export class ProductService {
 
         return {
           product: candidate,
-          score: cosineSimilarity(profileEmbedding, candidate.embedding),
+          score: this.scoreRecommendation(candidate, profileEmbedding, historyTags, historySubcategoryIds, historySpecies),
         };
       })
       .filter((item): item is { product: Product; score: number } => !!item && item.score > 0)
@@ -340,7 +378,7 @@ export class ProductService {
       throw new NotFoundError('Product not found');
     }
 
-    const baseEmbedding = baseProduct.embedding ?? (await this.buildEmbedding(baseProduct));
+    const baseEmbedding = baseProduct.embedding ?? [];
     if (baseEmbedding.length === 0) {
       return [];
     }
@@ -350,9 +388,17 @@ export class ProductService {
       where: {
         _id: { $ne: baseProduct._id },
         is_active: true,
+        subcategories: baseProduct.subcategories,
+        ...(baseProduct.species === 'both'
+          ? {}
+          : { species: { $in: [baseProduct.species, 'both'] } }),
       },
       take: 500
     });
+
+    const baseTags = (baseProduct.tags ?? []).map((tag) => tag.trim()).filter(Boolean);
+    const baseSubcategories = baseProduct.subcategories ? [baseProduct.subcategories] : [];
+    const baseSpecies = baseProduct.species ? [baseProduct.species] : [];
 
     const scored = candidates
       .map((candidate) => {
@@ -360,7 +406,7 @@ export class ProductService {
           return null;
         }
 
-        const score = cosineSimilarity(baseEmbedding, candidate.embedding);
+        const score = this.scoreRecommendation(candidate, baseEmbedding, baseTags, baseSubcategories, baseSpecies);
         return {
           product: candidate,
           score,
@@ -591,127 +637,45 @@ export class ProductService {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  private async buildEmbedding(product: Product): Promise<number[]> {
-    const brandName = await this.findBrandNameForEmbedding(product.brand);
-    const subCategoryContext = await this.findSubCategoryContextForEmbedding(product.subcategories);
-
-    const parts: string[] = [];
-
-    // Tên sản phẩm
-    if (product.name) {
-      parts.push(`Tên: ${product.name}`);
+  private scoreRecommendation(
+    candidate: Product,
+    embedding: number[],
+    tags: string[],
+    subcategoryIds: Array<ObjectId | string>,
+    species: Array<Product['species']>,
+  ): number {
+    const baseScore = cosineSimilarity(embedding, candidate.embedding ?? []);
+    if (baseScore <= 0) {
+      return 0;
     }
 
-    // Mô tả ngắn
-    if (product.description) {
-      parts.push(`Mô tả: ${product.description}`);
-    }
+    let bonus = 0;
 
-    // Mô tả chi tiết
-    if (product.longDescription) {
-      parts.push(`Chi tiết: ${product.longDescription}`);
-    }
-
-    // Cách dùng
-    if (product.usage) {
-      parts.push(`Hướng dẫn: ${product.usage}`);
-    }
-
-    // Thành phần
-    if (product.ingredients) {
-      parts.push(`Thành phần: ${product.ingredients}`);
-    }
-
-    // Thông số kỹ thuật
-    if (product.specifications && typeof product.specifications === 'object') {
-      const specs = Object.entries(product.specifications)
-        .filter(([, v]) => v)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join('; ');
-      if (specs) {
-        parts.push(`Thông số: ${specs}`);
+    if (candidate.subcategories && subcategoryIds.length > 0) {
+      const candidateSubcategoryId = candidate.subcategories.toHexString();
+      const hasSameSubcategory = subcategoryIds.some((id) =>
+        id instanceof ObjectId ? id.toHexString() === candidateSubcategoryId : id === candidateSubcategoryId,
+      );
+      if (hasSameSubcategory) {
+        bonus += 0.15;
       }
     }
 
-    // Lợi ích
-    if (product.benefits && typeof product.benefits === 'object') {
-      const benefits = Object.entries(product.benefits)
-        .filter(([, v]) => v)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join('; ');
-      if (benefits) {
-        parts.push(`Lợi ích: ${benefits}`);
+    const candidateTags = (candidate.tags ?? []).map((tag) => tag.trim()).filter(Boolean);
+    if (tags.length > 0 && candidateTags.length > 0) {
+      const tagHits = candidateTags.filter((tag) => tags.includes(tag)).length;
+      if (tagHits > 0) {
+        bonus += Math.min(0.25, tagHits * 0.03);
       }
     }
 
-    // Thương hiệu và danh mục
-    if (brandName) {
-      parts.push(`Thương hiệu: ${brandName}`);
+    if (candidate.species && species.length > 0) {
+      if (species.includes('both') || candidate.species === 'both' || species.includes(candidate.species)) {
+        bonus += 0.08;
+      }
     }
 
-    if (subCategoryContext.subCategoryName) {
-      parts.push(`Danh mục con: ${subCategoryContext.subCategoryName}`);
-    }
-
-    if (subCategoryContext.categoryName) {
-      parts.push(`Nhóm danh mục: ${subCategoryContext.categoryName}`);
-    }
-
-    return getEmbeddingFromValues(parts);
-  }
-
-  private toObjectId(value: unknown): ObjectId | undefined {
-    if (value instanceof ObjectId) {
-      return value;
-    }
-
-    if (typeof value === 'string' && ObjectId.isValid(value)) {
-      return new ObjectId(value);
-    }
-
-    return undefined;
-  }
-
-  private async findBrandNameForEmbedding(brandValue: unknown): Promise<string | undefined> {
-    const brandId = this.toObjectId(brandValue);
-    if (!brandId) {
-      return undefined;
-    }
-
-    await this.ensureBrandCache();
-    const normalized = this.brandNameByIdCache?.get(brandId.toHexString())?.trim();
-    return normalized || undefined;
-  }
-
-  private async findSubCategoryContextForEmbedding(subCategoryValue: unknown): Promise<{
-    subCategoryName?: string;
-    categoryName?: string;
-  }> {
-    const subCategoryId = this.toObjectId(subCategoryValue);
-    if (!subCategoryId) {
-      return {};
-    }
-
-    const category = await this.categoryRepo.findOne({
-      where: { 'subcategories._id': subCategoryId },
-    });
-
-    if (!category) {
-      return {};
-    }
-
-    const subCategoryHex = subCategoryId.toHexString();
-    const matchedSubCategory = (category.subcategories ?? []).find(
-      (subCategory) => subCategory._id.toHexString() === subCategoryHex,
-    );
-
-    const subCategoryName = matchedSubCategory?.name?.trim();
-    const categoryName = category.name?.trim();
-
-    return {
-      subCategoryName: subCategoryName || undefined,
-      categoryName: categoryName || undefined,
-    };
+    return baseScore * (1 + bonus);
   }
 
   private async isProductInFavorite(productId: ObjectId, customerId?: string): Promise<boolean> {

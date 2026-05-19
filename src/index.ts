@@ -17,10 +17,12 @@ import adminUserRouter from './app/features/admin/user';
 import adminDashboardRouter from './app/features/admin/dashboard';
 import adminCouponRouter from './app/features/admin/coupons';
 import adminProductRouter from './app/features/admin/products';
+import adminDiscountProgramRouter from './app/features/admin/discount-programs';
 import categoryRouter from './app/features/guest/category';
 import brandRouter from './app/features/guest/brand';
 import productRouter from './app/features/guest/product';
 import guestCouponRouter from './app/features/guest/coupon';
+import guestDiscountProgramRouter from './app/features/guest/discount-programs';
 import provinceRouter from './app/features/guest/province';
 import wardRouter from './app/features/guest/ward';
 
@@ -44,10 +46,12 @@ app.use('/', adminUserRouter);
 app.use('/', adminDashboardRouter);
 app.use('/', adminCouponRouter);
 app.use('/', adminProductRouter);
+app.use('/', adminDiscountProgramRouter);
 app.use('/', categoryRouter);
 app.use('/', brandRouter);
 app.use('/', productRouter);
 app.use('/', guestCouponRouter);
+app.use('/', guestDiscountProgramRouter);
 app.use('/', provinceRouter);
 app.use('/', wardRouter);
 

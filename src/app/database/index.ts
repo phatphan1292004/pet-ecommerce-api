@@ -14,6 +14,7 @@ import { Review } from '../entities/Review';
 import { Brand } from '../entities/Brand';
 import { Role } from '../entities/Role';
 import { Coupon } from '../entities/Coupon';
+import { DiscountProgram } from '../entities/DiscountProgram';
 import { Favorite } from '../entities/Favorite';
 import { ProductActivity } from '../entities/ProductActivity';
 
@@ -35,6 +36,7 @@ export const AppDataSource = new DataSource({
     Brand,
     Role,
     Coupon,
+    DiscountProgram,
     Favorite,
     ProductActivity,
   ],

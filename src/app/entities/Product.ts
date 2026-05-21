@@ -63,8 +63,17 @@ export class Product {
   @Column()
   shipping: string;
 
+  @Column({ default: 'both' })
+  species: 'dog' | 'cat' | 'both';
+
+  @Column('text', { array: true, default: [] })
+  tags: string[];
+
   @Column('text', { array: true })
   images: string[];
+
+  @Column('double', { array: true, nullable: true })
+  embedding?: number[];
 
   @Column({ default: true })
   is_active: boolean;

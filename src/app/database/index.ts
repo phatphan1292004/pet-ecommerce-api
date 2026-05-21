@@ -14,14 +14,32 @@ import { Review } from '../entities/Review';
 import { Brand } from '../entities/Brand';
 import { Role } from '../entities/Role';
 import { Coupon } from '../entities/Coupon';
+import { DiscountProgram } from '../entities/DiscountProgram';
 import { Favorite } from '../entities/Favorite';
+import { ProductActivity } from '../entities/ProductActivity';
 
 export const AppDataSource = new DataSource({
   type: 'mongodb',
   url: config.mongodb.uri,
   synchronize: false,
   logging: config.env !== 'production',
-  entities: [Customer, Category, Product, Province, Ward, Address, Cart, Order, Review, Brand, Role, Coupon, Favorite],
+  entities: [
+    Customer,
+    Category,
+    Product,
+    Province,
+    Ward,
+    Address,
+    Cart,
+    Order,
+    Review,
+    Brand,
+    Role,
+    Coupon,
+    DiscountProgram,
+    Favorite,
+    ProductActivity,
+  ],
 });
   
 export const connectDatabase = async (): Promise<void> => {

@@ -17,6 +17,7 @@ import { Coupon } from '../entities/Coupon';
 import { DiscountProgram } from '../entities/DiscountProgram';
 import { Favorite } from '../entities/Favorite';
 import { ProductActivity } from '../entities/ProductActivity';
+import { ChatMessage } from '../entities/ChatMessage';
 
 export const AppDataSource = new DataSource({
   type: 'mongodb',
@@ -39,6 +40,7 @@ export const AppDataSource = new DataSource({
     DiscountProgram,
     Favorite,
     ProductActivity,
+    ChatMessage,
   ],
 });
   

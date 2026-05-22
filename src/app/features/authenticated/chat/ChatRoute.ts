@@ -4,6 +4,21 @@ import { ChatService } from './ChatService';
 const router = Router();
 const chatService = new ChatService();
 
+router.get('/chat/conversations', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const conversations = await chatService.getConversations(limit);
+
+    res.status(200).json({
+      success: true,
+      message: 'Conversations fetched successfully',
+      data: conversations,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/chat/conversations/:conversationId/messages', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const conversationId = String(req.params.conversationId);

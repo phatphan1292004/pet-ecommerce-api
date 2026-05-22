@@ -15,12 +15,38 @@ Tai lieu nay huong dan frontend tich hop chat realtime voi backend (`Express + S
 - Frontend can cai `socket.io-client`
 - Co `conversationId` cho moi box chat
 - Co thong tin nguoi gui: `senderId`, `senderName`
+- Neu gui anh: can co `imageUrl`
 
 ```bash
 npm i socket.io-client
 ```
 
 ## 2) REST API (load history)
+
+### GET danh sach conversation (de hien list o admin)
+
+- Endpoint: `GET /chat/conversations?limit=50`
+
+Response mau:
+
+```json
+{
+  "success": true,
+  "message": "Conversations fetched successfully",
+  "data": [
+    {
+      "conversationId": "conv_123",
+      "lastMessage": "Hello",
+      "lastMessageType": "text",
+      "lastImageUrl": null,
+      "lastMessageAt": "2026-05-21T09:10:20.000Z",
+      "lastSenderId": "user_1",
+      "lastSenderName": "Nam",
+      "unreadCount": 2
+    }
+  ]
+}
+```
 
 ### GET messages theo conversation
 
@@ -40,12 +66,21 @@ Response mau:
       "senderId": "user_1",
       "senderName": "Nam",
       "message": "Xin chao",
+      "messageType": "text",
+      "imageUrl": null,
+      "isRead": false,
       "createdAt": "2026-05-21T09:10:20.000Z",
       "updatedAt": "2026-05-21T09:10:20.000Z"
     }
   ]
 }
 ```
+
+Giai thich them:
+
+- `messageType`: `text` | `image`
+- `imageUrl`: URL anh neu `messageType = image`
+- `isRead`: tin nhan da duoc ben con lai doc hay chua
 
 ## 3) Socket events
 
@@ -64,7 +99,22 @@ Response mau:
   "conversationId": "conv_123",
   "senderId": "user_1",
   "senderName": "Nam",
-  "message": "Hello realtime"
+  "message": "Hello realtime",
+  "messageType": "text",
+  "imageUrl": null,
+  "isRead": false
+}
+```
+
+Neu gui anh:
+
+```json
+{
+  "conversationId": "conv_123",
+  "senderId": "user_1",
+  "senderName": "Nam",
+  "messageType": "image",
+  "imageUrl": "https://cdn.example.com/chat/abc.jpg"
 }
 ```
 
@@ -86,6 +136,9 @@ type ChatMessage = {
   senderId: string;
   senderName: string | null;
   message: string;
+  messageType: "text" | "image";
+  imageUrl: string | null;
+  isRead: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -159,6 +212,7 @@ export default function ChatBox({
       senderId: currentUserId,
       senderName: currentUserName,
       message,
+      messageType: "text",
     });
 
     setText("");
@@ -169,7 +223,17 @@ export default function ChatBox({
       <div style={{ height: 300, overflowY: "auto", border: "1px solid #ddd", padding: 12 }}>
         {messages.map((m) => (
           <p key={m._id}>
-            <b>{m.senderName || m.senderId}:</b> {m.message}
+            <b>{m.senderName || m.senderId}:</b>{" "}
+            {m.messageType === "image" ? (
+              <img src={m.imageUrl || ""} alt="chat" style={{ maxWidth: 200, display: "block" }} />
+            ) : (
+              m.message
+            )}
+            {m.senderId === currentUserId ? (
+              <span style={{ marginLeft: 8, fontSize: 12, color: "#777" }}>
+                {m.isRead ? "da doc" : "chua doc"}
+              </span>
+            ) : null}
           </p>
         ))}
       </div>
@@ -190,6 +254,8 @@ export default function ChatBox({
 - Scroll xuong cuoi khi co `new_message`
 - Hien trang thai reconnect (`socket.connected`)
 - Handle `chat_error` de thong bao nguoi dung
+- Khi current user la nguoi gui, dung `isRead` de hien trang thai ben con lai da doc hay chua
+- Neu la nhan vien (admin), `isRead` van duoc hieu la ben con lai (user) da doc
 
 ## 6) Optional fallback (khong bat buoc)
 
@@ -204,7 +270,9 @@ Body:
   "conversationId": "conv_123",
   "senderId": "user_1",
   "senderName": "Nam",
-  "message": "Tin nhan tu REST"
+  "message": "Tin nhan tu REST",
+  "messageType": "text",
+  "imageUrl": null
 }
 ```
 

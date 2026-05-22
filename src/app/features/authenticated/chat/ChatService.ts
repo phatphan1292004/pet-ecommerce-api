@@ -26,6 +26,17 @@ export interface ChatMessageResponse {
   updatedAt: Date;
 }
 
+export interface ConversationListItem {
+  conversationId: string;
+  lastMessage: string;
+  lastMessageType: 'text' | 'image';
+  lastImageUrl: string | null;
+  lastMessageAt: Date;
+  lastSenderId: string;
+  lastSenderName: string | null;
+  unreadCount: number;
+}
+
 export class ChatService {
   private repo = AppDataSource.getMongoRepository(ChatMessage);
 
@@ -43,6 +54,45 @@ export class ChatService {
     });
 
     return messages.map((message) => this.toResponse(message));
+  }
+
+  async getConversations(limit: number = 50): Promise<ConversationListItem[]> {
+    const safeLimit = Math.min(Math.max(limit, 1), 200);
+
+    const cursor = this.repo.aggregate([
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: '$conversationId',
+          conversationId: { $first: '$conversationId' },
+          lastMessage: { $first: '$message' },
+          lastMessageType: { $first: '$messageType' },
+          lastImageUrl: { $first: '$imageUrl' },
+          lastMessageAt: { $first: '$createdAt' },
+          lastSenderId: { $first: '$senderId' },
+          lastSenderName: { $first: '$senderName' },
+          unreadCount: {
+            $sum: {
+              $cond: [{ $eq: ['$isRead', false] }, 1, 0],
+            },
+          },
+        },
+      },
+      { $sort: { lastMessageAt: -1 } },
+      { $limit: safeLimit },
+    ]);
+
+    const items = await cursor.toArray();
+    return items.map((item) => ({
+      conversationId: String(item.conversationId ?? item._id),
+      lastMessage: item.lastMessage ?? '',
+      lastMessageType: item.lastMessageType ?? 'text',
+      lastImageUrl: item.lastImageUrl ?? null,
+      lastMessageAt: item.lastMessageAt,
+      lastSenderId: item.lastSenderId,
+      lastSenderName: item.lastSenderName ?? null,
+      unreadCount: item.unreadCount ?? 0,
+    }));
   }
 
   async createMessage(payload: CreateChatMessagePayload): Promise<ChatMessageResponse> {

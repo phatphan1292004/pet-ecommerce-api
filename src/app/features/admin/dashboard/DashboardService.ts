@@ -5,7 +5,7 @@ import { Order } from '@/app/entities/Order';
 import { ObjectId } from 'mongodb';
 
 interface DashboardSummary {
-  revenueToday: number;
+  revenueThisMonth: number;
   newOrdersToday: number;
   newUsersToday: number;
   completionRate: number;
@@ -26,7 +26,7 @@ interface DashboardActivity {
 
 export interface DashboardResponse {
   summary: DashboardSummary;
-  overview7Days: DashboardOverviewItem[];
+  overviewMonths: DashboardOverviewItem[];
   recentActivities: DashboardActivity[];
 }
 
@@ -60,12 +60,14 @@ export class AdminDashboardService {
 
     const cartsById = new Map(carts.map((cart) => [cart._id.toHexString(), cart]));
     const todayRange = this.getDayRange(new Date());
+    const monthRange = this.getMonthRange(new Date());
 
     const ordersToday = orders.filter((order) => this.isInRange(order.createdAt, todayRange.start, todayRange.end));
     const usersToday = customers.filter((user) => this.isInRange(user.createdAt, todayRange.start, todayRange.end));
     const completedOrders = orders.filter((order) => order.status === 'close');
 
-    const revenueToday = ordersToday
+    const revenueThisMonth = orders
+      .filter((order) => this.isInRange(order.createdAt, monthRange.start, monthRange.end))
       .filter((order) => order.status === 'close')
       .reduce((sum, order) => {
         const cart = this.getCartByOrder(order, cartsById);
@@ -74,37 +76,39 @@ export class AdminDashboardService {
 
     const completionRate = orders.length > 0 ? Number(((completedOrders.length / orders.length) * 100).toFixed(1)) : 0;
 
-    const overview7Days = this.buildOverview7Days(orders, customers, cartsById);
+    const overviewMonths = this.buildOverviewMonths(orders, customers, cartsById, 6);
     const recentActivities = this.buildRecentActivities(orders, customers);
 
     return {
       summary: {
-        revenueToday,
+        revenueThisMonth,
         newOrdersToday: ordersToday.length,
         newUsersToday: usersToday.length,
         completionRate,
       },
-      overview7Days,
+      overviewMonths,
       recentActivities,
     };
   }
 
-  private buildOverview7Days(
+  private buildOverviewMonths(
     orders: Order[],
     customers: Customer[],
     cartsById: Map<string, Cart>,
+    months: number,
   ): DashboardOverviewItem[] {
     const items: DashboardOverviewItem[] = [];
 
-    for (let dayOffset = 6; dayOffset >= 0; dayOffset -= 1) {
+    const safeMonths = Math.max(1, Math.min(months, 12));
+    for (let monthOffset = safeMonths - 1; monthOffset >= 0; monthOffset -= 1) {
       const date = new Date();
-      date.setDate(date.getDate() - dayOffset);
-      const range = this.getDayRange(date);
+      date.setMonth(date.getMonth() - monthOffset, 1);
+      const range = this.getMonthRange(date);
 
-      const ordersOfDay = orders.filter((order) => this.isInRange(order.createdAt, range.start, range.end));
-      const usersOfDay = customers.filter((user) => this.isInRange(user.createdAt, range.start, range.end));
+      const ordersOfMonth = orders.filter((order) => this.isInRange(order.createdAt, range.start, range.end));
+      const usersOfMonth = customers.filter((user) => this.isInRange(user.createdAt, range.start, range.end));
 
-      const revenue = ordersOfDay
+      const revenue = ordersOfMonth
         .filter((order) => order.status === 'close')
         .reduce((sum, order) => {
           const cart = this.getCartByOrder(order, cartsById);
@@ -112,10 +116,10 @@ export class AdminDashboardService {
         }, 0);
 
       items.push({
-        date: range.start.toISOString().slice(0, 10),
+        date: `${range.start.getFullYear()}-${String(range.start.getMonth() + 1).padStart(2, '0')}`,
         revenue,
-        orders: ordersOfDay.length,
-        users: usersOfDay.length,
+        orders: ordersOfMonth.length,
+        users: usersOfMonth.length,
       });
     }
 
@@ -152,6 +156,13 @@ export class AdminDashboardService {
 
     const end = new Date(date);
     end.setHours(23, 59, 59, 999);
+
+    return { start, end };
+  }
+
+  private getMonthRange(date: Date): { start: Date; end: Date } {
+    const start = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+    const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
 
     return { start, end };
   }

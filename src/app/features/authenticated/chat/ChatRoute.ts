@@ -1,8 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ChatService } from './ChatService';
+import { ChatRagService } from './ChatRagService';
 
 const router = Router();
 const chatService = new ChatService();
+const chatRagService = new ChatRagService();
 
 router.get('/chat/conversations', async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -44,6 +46,32 @@ router.post('/chat/messages', async (req: Request, res: Response, next: NextFunc
       success: true,
       message: 'Message sent successfully',
       data: message,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/chat/rag', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { question, limit, productLimit, includeProducts } = req.body as {
+      question?: string;
+      limit?: number;
+      productLimit?: number;
+      includeProducts?: boolean;
+    };
+
+    const answer = await chatRagService.askQuestion({
+      question: question ?? '',
+      limit,
+      productLimit,
+      includeProducts,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'RAG response generated successfully',
+      data: answer,
     });
   } catch (error) {
     next(error);

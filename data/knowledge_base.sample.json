@@ -1,14 +1,44 @@
 [
   {
-    "title": "Shipping policy",
-    "content": "We ship nationwide within 2-3 business days. Orders are processed on business days only.",
+    "title": "What is your shipping policy?",
+    "content": "We ship nationwide within 2-3 business days. Orders are processed on business days only. If you need details by city or faster delivery options, please tell us your location.",
     "tags": ["shipping", "delivery"],
     "source": "policy/shipping"
   },
   {
-    "title": "Return policy",
-    "content": "Returns are accepted within 7 days if the product is unopened and in original condition.",
+    "title": "What is your return policy?",
+    "content": "Returns are accepted within 7 days if the product is unopened and in original condition. If your case is different, please share the order date and product condition so we can advise.",
     "tags": ["return", "refund"],
     "source": "policy/returns"
+  },
+  {
+    "title": "How do I take care of my dog or cat?",
+    "content": "Basic pet care includes proper nutrition, vaccination schedule, hygiene, and regular health checks. For tailored advice, please share your pet's age, weight, and current condition.",
+    "tags": ["cham-soc", "thu-cung", "cho", "meo"],
+    "source": "care/overview"
+  },
+  {
+    "title": "How should I choose food for my pet?",
+    "content": "Choose food based on age, species, and health needs. If your pet has digestive issues or allergies, consider specialized diets and share the symptoms for better guidance.",
+    "tags": ["dinh-duong", "thuc-an", "cho", "meo"],
+    "source": "care/nutrition"
+  },
+  {
+    "title": "What is the vaccination schedule for pets?",
+    "content": "Vaccination schedules depend on age and previous shots. Please provide your pet's age and vaccination history for a specific recommendation.",
+    "tags": ["tiem-phong", "suc-khoe", "cho", "meo"],
+    "source": "care/vaccination"
+  },
+  {
+    "title": "How can I contact the store?",
+    "content": "We can share business hours, hotline, address, social channels, and support methods. Please tell us which details you need.",
+    "tags": ["cua-hang", "hotline", "dia-chi", "lien-he"],
+    "source": "store/info"
+  },
+  {
+    "title": "What promotions are available right now?",
+    "content": "Promotions are updated regularly. Please tell us the category you want (food, toys, health care) so we can share the most relevant offers.",
+    "tags": ["khuyen-mai", "uu-dai", "giam-gia"],
+    "source": "promo/current"
   }
 ]

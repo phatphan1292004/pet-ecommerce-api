@@ -9,6 +9,7 @@ import { NotFoundError, BadRequestError } from '@/app/exceptions/AppError';
 import { cosineSimilarity } from '@/app/utils/contentEmbedding';
 import { ObjectId } from 'mongodb';
 
+
 export interface ProductResponse {
   _id: ObjectId;
   name: string;
@@ -555,6 +556,65 @@ export class ProductService {
     };
   }
 
+  async searchProductsForChatbot(
+    question: string,
+    page?: number,
+    limit?: number,
+    sortBy?: ProductFilterParams['sortBy']
+  ): Promise<ProductFilterResult> {
+    const keyword = question?.trim() ?? '';
+    const pageNum = page && page > 0 ? Math.floor(page) : 1;
+    const limitNum = limit && limit > 0 ? Math.min(Math.floor(limit), 60) : 12;
+    const skip = (pageNum - 1) * limitNum;
+
+    const keywordTokens = this.extractSearchTokens(keyword);
+    if (keywordTokens.length === 0) {
+      return this.filterProducts({ page: pageNum, limit: limitNum, sortBy });
+    }
+
+    const match: Record<string, unknown> = {
+      is_active: true,
+      $and: this.buildTokenMatch(keywordTokens),
+    };
+
+    const sortStage = this.getSortStage(sortBy ?? 'latest');
+    const pipeline = [
+      { $match: match },
+      {
+        $facet: {
+          items: [{ $sort: sortStage }, { $skip: skip }, { $limit: limitNum }],
+          total: [{ $count: 'count' }]
+        }
+      }
+    ];
+
+    const aggregateResult = (await this.repo.aggregate(pipeline).toArray()) as Array<{
+      items: Product[];
+      total: Array<{ count: number }>;
+    }>;
+
+    const firstResult = aggregateResult[0] ?? { items: [], total: [] };
+    const total = firstResult.total[0]?.count ?? 0;
+
+    return {
+      items: firstResult.items.map(this.toProductResponse),
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: total > 0 ? Math.ceil(total / limitNum) : 0
+    };
+  }
+
+  async searchProductsByEmbedding(queryEmbedding: number[], limit: number): Promise<ProductResponse[]> {
+    const safeLimit = Math.max(1, Math.min(Math.floor(limit), 20));
+
+    if (queryEmbedding.length === 0) {
+      return [];
+    }
+
+    return this.searchProductsByCosine(queryEmbedding, safeLimit);
+  }
+
   // Helper methods
 
   /**
@@ -572,6 +632,28 @@ export class ProductService {
       image: product.images && product.images.length > 0 ? product.images[0] : '',
       subcategoryId: product.subcategories?.toHexString?.()
     };
+  }
+
+  private async searchProductsByCosine(queryEmbedding: number[], limit: number): Promise<ProductResponse[]> {
+    const products = await this.repo.find({ where: { is_active: true } });
+
+    const scored = products
+      .map((product) => {
+        const embedding = product.embedding ?? [];
+        if (embedding.length === 0) {
+          return null;
+        }
+
+        return {
+          product,
+          score: cosineSimilarity(queryEmbedding, embedding),
+        };
+      })
+      .filter((item): item is { product: Product; score: number } => !!item && item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    return scored.map((item) => this.toProductResponse(item.product));
   }
 
   /**
@@ -635,6 +717,72 @@ export class ProductService {
 
   private escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  private extractSearchTokens(input: string): string[] {
+    const normalized = input
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!normalized) {
+      return [];
+    }
+
+    const stopWords = new Set([
+      'tôi',
+      'tìm',
+      'muốn',
+      'cần',
+      'các',
+      'cái',
+      'những',
+      'sản',
+      'phẩm',
+      'loại',
+      'như',
+      'thế',
+      'này',
+      'và',
+      'là',
+      'có',
+      'không',
+      'giúp',
+      'với',
+      'về',
+      'từ',
+      'ở',
+      'trên',
+      'dưới',
+      'theo',
+      'để',
+      'vô',
+      'đến',
+      'một',
+      'nhiều',
+      'ít',
+      'hay',
+      'đã',
+      'đang',
+      'sẽ',
+      'nữa',
+    ]);
+
+    return normalized
+      .split(' ')
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2)
+      .filter((token) => !stopWords.has(token));
+  }
+
+  private buildTokenMatch(tokens: string[]): Array<Record<string, unknown>> {
+    return tokens.map((token) => {
+      const regex = new RegExp(this.escapeRegex(token), 'i');
+      return {
+        $or: [{ name: regex }, { slug: regex }, { description: regex }],
+      };
+    });
   }
 
   private scoreRecommendation(

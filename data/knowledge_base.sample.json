@@ -1,0 +1,14 @@
+[
+  {
+    "title": "Shipping policy",
+    "content": "We ship nationwide within 2-3 business days. Orders are processed on business days only.",
+    "tags": ["shipping", "delivery"],
+    "source": "policy/shipping"
+  },
+  {
+    "title": "Return policy",
+    "content": "Returns are accepted within 7 days if the product is unopened and in original condition.",
+    "tags": ["return", "refund"],
+    "source": "policy/returns"
+  }
+]

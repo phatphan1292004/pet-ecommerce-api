@@ -2,14 +2,20 @@ import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import { registerChatSocket } from './chatSocket';
 
+let ioInstance: Server | null = null;
+
 export const createSocketServer = (httpServer: HttpServer): Server => {
-  const io = new Server(httpServer, {
+  ioInstance = new Server(httpServer, {
     cors: {
       origin: '*',
       methods: ['GET', 'POST'],
     },
   });
 
-  registerChatSocket(io);
-  return io;
+  registerChatSocket(ioInstance);
+  return ioInstance;
+};
+
+export const getIo = (): Server | null => {
+  return ioInstance;
 };

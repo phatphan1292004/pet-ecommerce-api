@@ -3,6 +3,7 @@ import { Cart } from '@/app/entities/Cart';
 import { Order } from '@/app/entities/Order';
 import { BadRequestError, NotFoundError } from '@/app/exceptions/AppError';
 import { ObjectId } from 'mongodb';
+import { getIo } from '../../../socket';
 
 export interface CreateOrderPayload {
   customerId: string;
@@ -264,7 +265,23 @@ export class OrderService {
       note: payload.note?.trim(),
     });
 
-    return this.orderRepo.save(order);
+    const savedOrder = await this.orderRepo.save(order);
+
+    try {
+      const io = getIo();
+      if (io) {
+        io.emit('new_order', {
+          orderId: savedOrder._id.toHexString(),
+          customerId: savedOrder.customerId,
+          arrivalName: savedOrder.arrivalName,
+          createdAt: savedOrder.createdAt,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to emit new_order socket event:', err);
+    }
+
+    return savedOrder;
   }
 
   private validatePayload(payload: CreateOrderPayload): void {

@@ -123,7 +123,8 @@ router.get('/products/filter', async (req: Request, res: Response, next: NextFun
       sortBy: typeof req.query.sortBy === 'string' ? (req.query.sortBy as any) : undefined,
       page: parseNumber(req.query.page),
       limit: parseNumber(req.query.limit),
-      keyword: typeof req.query.keyword === 'string' ? req.query.keyword : undefined
+      keyword: typeof req.query.keyword === 'string' ? req.query.keyword : undefined,
+      productType: typeof req.query.productType === 'string' ? req.query.productType : undefined
     });
 
     res.json({

@@ -5,6 +5,7 @@ import { BadRequestError } from '../../../exceptions/AppError';
 import { getGoogleAiStudioEmbedding, cosineSimilarity } from '../../../utils/contentEmbedding';
 import { generateGeminiResponse } from '../../../utils/geminiChat';
 import { ProductService } from '../../guest/product/ProductService';
+import { buildChatRagPrompt } from './ChatPrompt';
 
 const DEFAULT_KB_LIMIT = 6;
 const DEFAULT_PRODUCT_LIMIT = 6;
@@ -65,7 +66,7 @@ export class ChatRagService {
 
     const [kbResults, productResults] = await Promise.all([
       this.searchKnowledgeBase(queryEmbedding, kbLimit),
-      includeProducts ? this.getProductSuggestions(question, productLimit) : Promise.resolve([]),
+      includeProducts ? this.getProductSuggestions(question, queryEmbedding, productLimit) : Promise.resolve([]),
     ]);
 
     const prompt = this.buildPrompt(question, kbResults, productResults);
@@ -144,10 +145,30 @@ export class ChatRagService {
     return scored.slice(0, limit);
   }
 
-  private async getProductSuggestions(question: string, limit: number): Promise<RagProductItem[]> {
+  private async getProductSuggestions(
+    question: string,
+    queryEmbedding: number[],
+    limit: number,
+  ): Promise<RagProductItem[]> {
     const result = await this.productService.searchProductsForChatbot(question, 1, limit, 'latest');
+    let items = result.items;
 
-    return result.items.map((product) => ({
+    // Fallback to semantic search if keyword token-based search returns no results
+    if (items.length === 0 && queryEmbedding && queryEmbedding.length > 0) {
+      const vectorProducts = await this.productService.searchProductsByEmbedding(queryEmbedding, limit);
+      items = vectorProducts.map((p) => ({
+        _id: p._id,
+        name: p.name,
+        slug: p.slug,
+        price: p.price,
+        originalPrice: p.originalPrice,
+        discount: p.discount,
+        review: p.review,
+        image: p.image,
+      }));
+    }
+
+    return items.map((product) => ({
       id: product._id instanceof ObjectId ? product._id.toHexString() : String(product._id),
       name: product.name,
       slug: product.slug,
@@ -178,22 +199,6 @@ export class ChatRagService {
       )
       .join('\n\n');
 
-    const promptParts = [
-      'You are a sales assistant for a pet e-commerce shop.',
-      'Respond in Vietnamese.',
-      'Use only the provided context to answer.',
-      'If Product Candidates are available, use them as primary context for product-related questions.',
-      'If both Knowledge Base Context and Product Candidates are insufficient, say you do not know and ask a follow-up question.',
-      'If Product Candidates are available, answer with exactly: "Hiện tại cửa hàng của chúng tôi đang có những mặt hàng sau." and nothing else.',
-      'Do not list product names in the answer.',
-      '',
-      `Question: ${question}`,
-      '',
-      contextText ? `Knowledge Base Context:\n${contextText}` : 'Knowledge Base Context: (none)',
-      '',
-      productText ? `Product Candidates:\n${productText}` : 'Product Candidates: (none)',
-    ];
-
-    return promptParts.join('\n');
+    return buildChatRagPrompt(question, contextText, productText);
   }
 }

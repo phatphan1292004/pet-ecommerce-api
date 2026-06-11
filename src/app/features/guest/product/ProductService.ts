@@ -10,6 +10,7 @@ import { cosineSimilarity } from '@/app/utils/contentEmbedding';
 import { ObjectId } from 'mongodb';
 
 
+
 export interface ProductResponse {
   _id: ObjectId;
   name: string;
@@ -32,6 +33,7 @@ export interface ProductFilterParams {
   page?: number;
   limit?: number;
   keyword?: string;
+  productType?: string;
 }
 
 export interface ProductFilterResult {
@@ -465,6 +467,24 @@ export class ProductService {
     const originValues = (params.origins ?? []).map((origin) => origin.trim()).filter(Boolean);
     if (originValues.length > 0) {
       match['specifications.origin'] = { $in: originValues };
+    }
+
+    if (params.productType) {
+      if (params.productType === 'popular') {
+        const popularIds = await this.getPopularProductIds(200);
+        match._id = { $in: popularIds };
+      } else if (params.productType === 'best-selling' || params.productType === 'bestSelling') {
+        const bestSellingIds = await this.getBestSellingProductIds(200);
+        match._id = { $in: bestSellingIds };
+      } else if (params.productType === 'new') {
+        const latestProducts = await this.repo.find({
+          where: { is_active: true },
+          order: { created_at: 'DESC' },
+          take: 100
+        });
+        const latestIds = latestProducts.map((p) => p._id);
+        match._id = { $in: latestIds };
+      }
     }
 
     if (params.keyword && params.keyword.trim()) {
@@ -1002,5 +1022,55 @@ export class ProductService {
     }
 
     return vector.map((value) => value / norm);
+  }
+
+  private async getPopularProductIds(limit = 100): Promise<ObjectId[]> {
+    const pipeline = [
+      { $unwind: '$products' },
+      { $group: { _id: '$products', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: limit }
+    ];
+
+    const aggregateResult = await (this.favoriteRepo as any).aggregate(pipeline).toArray();
+    if (!Array.isArray(aggregateResult) || aggregateResult.length === 0) {
+      return [];
+    }
+
+    return aggregateResult
+      .map((r) => {
+        try {
+          return typeof r._id === 'string' ? new ObjectId(r._id) : r._id;
+        } catch {
+          return null;
+        }
+      })
+      .filter((id): id is ObjectId => id instanceof ObjectId);
+  }
+
+  private async getBestSellingProductIds(limit = 100): Promise<ObjectId[]> {
+    const pipeline = [
+      { $match: { status: 'close', products: { $exists: true, $ne: [] } } },
+      { $unwind: '$products' },
+      { $group: { _id: '$products.productId', quantity: { $sum: '$products.quantity' } } },
+      { $sort: { quantity: -1 } },
+      { $limit: limit }
+    ];
+
+    const aggregateResult = await (this.cartRepo as any).aggregate(pipeline).toArray();
+    if (!Array.isArray(aggregateResult) || aggregateResult.length === 0) {
+      return [];
+    }
+
+    return aggregateResult
+      .map((r) => {
+        try {
+          const idStr = typeof r._id === 'string' ? r._id : String(r._id);
+          return ObjectId.isValid(idStr) ? new ObjectId(idStr) : null;
+        } catch {
+          return null;
+        }
+      })
+      .filter((id): id is ObjectId => id instanceof ObjectId);
   }
 }

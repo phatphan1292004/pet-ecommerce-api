@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ChatService } from './ChatService';
 import { ChatRagService } from './ChatRagService';
+import { getIo } from '../../../socket';
 
 const router = Router();
 const chatService = new ChatService();
@@ -9,12 +10,33 @@ const chatRagService = new ChatRagService();
 router.get('/chat/conversations', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const limit = req.query.limit ? Number(req.query.limit) : 50;
-    const conversations = await chatService.getConversations(limit);
+    const readerId = req.query.readerId ? String(req.query.readerId) : undefined;
+    const conversations = await chatService.getConversations(limit, readerId);
 
     res.status(200).json({
       success: true,
       message: 'Conversations fetched successfully',
       data: conversations,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/chat/conversations/:conversationId/read', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const conversationId = String(req.params.conversationId);
+    const { readerId } = req.body;
+    await chatService.markAsRead(conversationId, readerId);
+
+    const io = getIo();
+    if (io) {
+      io.to(conversationId).emit('messages_read', { conversationId, readerId });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Messages marked as read successfully',
     });
   } catch (error) {
     next(error);

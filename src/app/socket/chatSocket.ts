@@ -36,6 +36,7 @@ export const registerChatSocket = (io: Server): void => {
       try {
         const savedMessage = await chatService.createMessage(payload);
         io.to(payload.conversationId).emit('new_message', savedMessage);
+        io.to('admin').emit('new_message_admin', savedMessage);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Failed to send message';
         socket.emit('chat_error', { message });

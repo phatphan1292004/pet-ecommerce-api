@@ -56,8 +56,17 @@ export class ChatService {
     return messages.map((message) => this.toResponse(message));
   }
 
-  async getConversations(limit: number = 50): Promise<ConversationListItem[]> {
+  async getConversations(limit: number = 50, readerId?: string): Promise<ConversationListItem[]> {
     const safeLimit = Math.min(Math.max(limit, 1), 200);
+
+    const unreadCond = readerId
+      ? {
+          $and: [
+            { $eq: ['$isRead', false] },
+            { $ne: ['$senderId', readerId] }
+          ]
+        }
+      : { $eq: ['$isRead', false] };
 
     const cursor = this.repo.aggregate([
       { $sort: { createdAt: -1 } },
@@ -73,7 +82,7 @@ export class ChatService {
           lastSenderName: { $first: '$senderName' },
           unreadCount: {
             $sum: {
-              $cond: [{ $eq: ['$isRead', false] }, 1, 0],
+              $cond: [unreadCond, 1, 0],
             },
           },
         },
@@ -93,6 +102,18 @@ export class ChatService {
       lastSenderName: item.lastSenderName ?? null,
       unreadCount: item.unreadCount ?? 0,
     }));
+  }
+
+  async markAsRead(conversationId: string, readerId: string): Promise<boolean> {
+    if (!conversationId || !readerId) {
+      throw new BadRequestError('conversationId and readerId are required');
+    }
+
+    await this.repo.updateMany(
+      { conversationId, senderId: { $ne: readerId }, isRead: false },
+      { $set: { isRead: true } }
+    );
+    return true;
   }
 
   async createMessage(payload: CreateChatMessagePayload): Promise<ChatMessageResponse> {

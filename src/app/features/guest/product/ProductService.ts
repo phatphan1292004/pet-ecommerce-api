@@ -427,7 +427,7 @@ export class ProductService {
    */
   async filterProducts(params: ProductFilterParams): Promise<ProductFilterResult> {
     const page = params.page && params.page > 0 ? Math.floor(params.page) : 1;
-    const limit = params.limit && params.limit > 0 ? Math.min(Math.floor(params.limit), 60) : 12;
+    const limit = params.limit && params.limit > 0 ? Math.min(Math.floor(params.limit), 200) : 100;
     const skip = (page - 1) * limit;
 
     const match: Record<string, unknown> = {

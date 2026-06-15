@@ -9,6 +9,7 @@
     "backfill:embeddings": "ts-node -r tsconfig-paths/register src/scripts/backfillProductEmbeddings.ts",
     "seed:knowledge-base": "ts-node -r tsconfig-paths/register src/scripts/ingestKnowledgeBase.ts",
     "seed:discount-program": "ts-node -r tsconfig-paths/register src/scripts/createDiscountProgram.ts",
+    "seed:products": "ts-node -r tsconfig-paths/register src/scripts/seedProducts.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

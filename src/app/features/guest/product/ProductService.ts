@@ -1,4 +1,5 @@
 import { AppDataSource } from '@/app/database';
+import { Brand } from '@/app/entities/Brand';
 import { Category } from '@/app/entities/Categories';
 import { Customer } from '@/app/entities/Customer';
 import { Favorite } from '@/app/entities/Favorite';
@@ -587,42 +588,299 @@ export class ProductService {
     const limitNum = limit && limit > 0 ? Math.min(Math.floor(limit), 60) : 12;
     const skip = (pageNum - 1) * limitNum;
 
-    const keywordTokens = this.extractSearchTokens(keyword);
-    if (keywordTokens.length === 0) {
+    const tokens = this.extractSmartTokens(keyword);
+    if (tokens.length === 0) {
       return this.filterProducts({ page: pageNum, limit: limitNum, sortBy });
     }
 
-    const match: Record<string, unknown> = {
-      is_active: true,
-      $and: this.buildTokenMatch(keywordTokens),
-    };
+    // Load active products, active brands, and categories to match names/types/ids
+    const [products, brands, categories] = await Promise.all([
+      this.repo.find({ where: { is_active: true } }),
+      AppDataSource.getMongoRepository(Brand).find({ where: { is_active: true } }),
+      this.categoryRepo.find({ where: { is_active: true } }),
+    ]);
 
-    const sortStage = this.getSortStage(sortBy ?? 'latest');
-    const pipeline = [
-      { $match: match },
-      {
-        $facet: {
-          items: [{ $sort: sortStage }, { $skip: skip }, { $limit: limitNum }],
-          total: [{ $count: 'count' }]
+    const brandMap = new Map<string, string>(); // lower-cased name -> brand id hex
+    const brandIdToName = new Map<string, string>();
+    for (const b of brands) {
+      const name = b.name?.trim().toLowerCase();
+      if (name) {
+        brandMap.set(name, b._id.toHexString());
+        brandIdToName.set(b._id.toHexString(), b.name);
+      }
+    }
+
+    const subCategoryMap = new Map<string, string>(); // lower-cased subcategory name -> subcategory id hex
+    const subCategoryIdToName = new Map<string, string>();
+    for (const cat of categories) {
+      if (cat.subcategories) {
+        for (const sub of cat.subcategories) {
+          const name = sub.name?.trim().toLowerCase();
+          if (name) {
+            subCategoryMap.set(name, sub._id.toHexString());
+            subCategoryIdToName.set(sub._id.toHexString(), sub.name);
+          }
         }
       }
+    }
+
+    const questionLower = keyword.toLowerCase();
+
+    // 1. Detect species
+    let detectedSpecies: 'dog' | 'cat' | null = null;
+    const dogKeywords = ['chó', 'cún', 'dog', 'puppy', 'poodle', 'phốc sóc', 'alaska', 'husky', 'pug', 'golden', 'becgie', 'cún con', 'chó con', 'chó lớn', 'chó trưởng thành'];
+    const catKeywords = ['mèo', 'miu', 'cat', 'kitten', 'whiskas', 'catty', 'nekko', 'mèo con', 'mèo lớn', 'mèo trưởng thành'];
+    
+    const hasDog = dogKeywords.some(kw => questionLower.includes(kw));
+    const hasCat = catKeywords.some(kw => questionLower.includes(kw));
+    if (hasDog && !hasCat) {
+      detectedSpecies = 'dog';
+    } else if (hasCat && !hasDog) {
+      detectedSpecies = 'cat';
+    }
+
+    // 2. Detect brands
+    const detectedBrandIds: string[] = [];
+    for (const [brandName, brandId] of brandMap.entries()) {
+      if (questionLower.includes(brandName)) {
+        detectedBrandIds.push(brandId);
+      }
+    }
+
+    // 3. Detect subcategories (product type)
+    const detectedSubCategoryIds: string[] = [];
+    for (const [subName, subId] of subCategoryMap.entries()) {
+      if (questionLower.includes(subName)) {
+        detectedSubCategoryIds.push(subId);
+      }
+    }
+    // Check general terms/synonyms
+    if (questionLower.includes('hạt') || questionLower.includes('thức ăn khô') || questionLower.includes('kibble')) {
+      for (const [subName, subId] of subCategoryMap.entries()) {
+        if (subName.includes('hạt') || subName.includes('khô')) {
+          detectedSubCategoryIds.push(subId);
+        }
+      }
+    }
+    if (questionLower.includes('pate') || questionLower.includes('thức ăn ướt') || questionLower.includes('gravy') || questionLower.includes('lon') || questionLower.includes('xốt') || questionLower.includes('sốt')) {
+      for (const [subName, subId] of subCategoryMap.entries()) {
+        if (subName.includes('pate') || subName.includes('sốt') || subName.includes('xốt') || subName.includes('lon')) {
+          detectedSubCategoryIds.push(subId);
+        }
+      }
+    }
+    if (questionLower.includes('cát') || questionLower.includes('vệ sinh')) {
+      for (const [subName, subId] of subCategoryMap.entries()) {
+        if (subName.includes('cát') || subName.includes('vệ sinh')) {
+          detectedSubCategoryIds.push(subId);
+        }
+      }
+    }
+    if (questionLower.includes('sữa tắm') || questionLower.includes('tắm') || questionLower.includes('dầu gội')) {
+      for (const [subName, subId] of subCategoryMap.entries()) {
+        if (subName.includes('tắm') || subName.includes('gội') || subName.includes('shampoo') || subName.includes('mượt lông')) {
+          detectedSubCategoryIds.push(subId);
+        }
+      }
+    }
+    if (questionLower.includes('bánh thưởng') || questionLower.includes('snack') || questionLower.includes('que gặm') || questionLower.includes('xương gặm') || questionLower.includes('súp thưởng')) {
+      for (const [subName, subId] of subCategoryMap.entries()) {
+        if (subName.includes('thưởng') || subName.includes('snack') || subName.includes('gặm') || subName.includes('xương')) {
+          detectedSubCategoryIds.push(subId);
+        }
+      }
+    }
+
+    // 4. Detect lifestage (age/size)
+    let detectedLifestage: 'young' | 'adult' | null = null;
+    const youngKeywords = [
+      'con', 'nhỏ', 'baby', 'puppy', 'kitten', 'tập ăn', 
+      'dưới 1 tuổi', 'dưới một tuổi', 'sơ sinh', 'mới đẻ', 'mới sinh',
+      'tháng tuổi', 'tháng', 'bầu', 'thai'
     ];
+    const adultKeywords = [
+      'lớn', 'trưởng thành', 'adult', 'già', 'senior', 'lớn tuổi', 
+      '1 tuổi', '2 tuổi', '3 tuổi', '4 tuổi', '5 tuổi', '6 tuổi', '7 tuổi', '8 tuổi', '9 tuổi', '10 tuổi',
+      'một tuổi', 'hai tuổi', 'ba tuổi', 'bốn tuổi', 'năm tuổi'
+    ];
+    
+    const hasYoung = youngKeywords.some(kw => questionLower.includes(kw));
+    const hasAdult = adultKeywords.some(kw => questionLower.includes(kw));
+    if (hasYoung && !hasAdult) {
+      detectedLifestage = 'young';
+    } else if (hasAdult && !hasYoung) {
+      detectedLifestage = 'adult';
+    }
 
-    const aggregateResult = (await this.repo.aggregate(pipeline).toArray()) as Array<{
-      items: Product[];
-      total: Array<{ count: number }>;
-    }>;
+    const scoredProducts = products.map((product) => {
+      let score = 0;
 
-    const firstResult = aggregateResult[0] ?? { items: [], total: [] };
-    const total = firstResult.total[0]?.count ?? 0;
+      const productName = product.name?.toLowerCase() ?? '';
+      const productDesc = product.description?.toLowerCase() ?? '';
+      const productLongDesc = product.longDescription?.toLowerCase() ?? '';
+      const productTags = (product.tags ?? []).map(t => t.toLowerCase().trim());
+      const productBrandId = product.brand instanceof ObjectId ? product.brand.toHexString() : String(product.brand);
+      const productSubCatId = product.subcategories instanceof ObjectId ? product.subcategories.toHexString() : String(product.subcategories);
+      const productSpecies = product.species ?? 'both';
+
+      // 1. Species Match
+      if (detectedSpecies) {
+        if (productSpecies === detectedSpecies) {
+          score += 15;
+        } else if (productSpecies === 'both') {
+          score += 5;
+        } else {
+          score -= 30; // heavy mismatch penalty
+        }
+      }
+
+      // 2. Brand Match
+      if (detectedBrandIds.length > 0) {
+        if (detectedBrandIds.includes(productBrandId)) {
+          score += 25;
+        }
+      }
+
+      // 3. Subcategory Match
+      if (detectedSubCategoryIds.length > 0) {
+        if (detectedSubCategoryIds.includes(productSubCatId)) {
+          score += 20;
+        }
+      }
+
+      // 4. Lifestage Match
+      if (detectedLifestage) {
+        const isYoungProduct = productTags.some(t => 
+          t.includes('con') || t.includes('nhỏ') || t.includes('puppy') || t.includes('kitten') || t.includes('tập ăn') || t.includes('dưới 12 tháng') || t.includes('dưới 1 tuổi')
+        ) || productName.includes('con') || productName.includes('nhỏ') || productName.includes('puppy') || productName.includes('kitten') || productName.includes('mini');
+
+        const isAdultProduct = productTags.some(t => 
+          t.includes('lớn') || t.includes('trưởng thành') || t.includes('adult') || t.includes('già') || t.includes('senior')
+        ) || productName.includes('lớn') || productName.includes('trưởng thành') || productName.includes('adult') || productName.includes('già') || productName.includes('senior');
+
+        if (detectedLifestage === 'young') {
+          if (isYoungProduct) {
+            score += 20;
+          }
+          if (isAdultProduct) {
+            score -= 15;
+          }
+        } else if (detectedLifestage === 'adult') {
+          if (isAdultProduct) {
+            score += 20;
+          }
+          if (isYoungProduct) {
+            score -= 15;
+          }
+        }
+      }
+
+      // 5. Token match
+      let matchedTokensCount = 0;
+      for (const token of tokens) {
+        // Tag match (very high priority)
+        const matchedTag = productTags.some(tag => tag === token || tag.includes(token) || token.includes(tag));
+        if (matchedTag) {
+          score += 10;
+          matchedTokensCount++;
+        }
+
+        // Name match
+        if (productName.includes(token)) {
+          score += 6;
+          matchedTokensCount++;
+        }
+
+        // Subcategory name match
+        const subName = subCategoryIdToName.get(productSubCatId)?.toLowerCase() ?? '';
+        if (subName && (subName.includes(token) || token.includes(subName))) {
+          score += 4;
+          matchedTokensCount++;
+        }
+
+        // Brand name match
+        const bName = brandIdToName.get(productBrandId)?.toLowerCase() ?? '';
+        if (bName && (bName.includes(token) || token.includes(bName))) {
+          score += 4;
+          matchedTokensCount++;
+        }
+
+        // Description match
+        if (productDesc.includes(token) || productLongDesc.includes(token)) {
+          score += 2;
+          matchedTokensCount++;
+        }
+      }
+
+      if (tokens.length > 0 && matchedTokensCount === 0) {
+        score -= 10;
+      }
+
+      return {
+        product,
+        score,
+      };
+    });
+
+    const filtered = scoredProducts
+      .filter((item) => item.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) {
+          return b.score - a.score;
+        }
+
+        // Secondary sort if scores are identical
+        const aTime = a.product.created_at ? new Date(a.product.created_at).getTime() : 0;
+        const bTime = b.product.created_at ? new Date(b.product.created_at).getTime() : 0;
+
+        switch (sortBy) {
+          case 'priceAsc':
+            return a.product.price - b.product.price || bTime - aTime;
+          case 'priceDesc':
+            return b.product.price - a.product.price || bTime - aTime;
+          case 'discountDesc':
+            return b.product.discount - a.product.discount || bTime - aTime;
+          case 'reviewDesc':
+            return b.product.review - a.product.review || bTime - aTime;
+          default:
+            return bTime - aTime;
+        }
+      });
+
+    const paginated = filtered.slice(skip, skip + limitNum);
+    const total = filtered.length;
 
     return {
-      items: firstResult.items.map(this.toProductResponse),
+      items: paginated.map((item) => this.toProductResponse(item.product)),
       total,
       page: pageNum,
       limit: limitNum,
-      totalPages: total > 0 ? Math.ceil(total / limitNum) : 0
+      totalPages: total > 0 ? Math.ceil(total / limitNum) : 0,
     };
+  }
+
+  private extractSmartTokens(input: string): string[] {
+    const normalized = input
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\-]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!normalized) {
+      return [];
+    }
+
+    const stopWords = new Set([
+      'tôi', 'tìm', 'muốn', 'cần', 'các', 'cái', 'những', 'sản', 'phẩm', 'loại', 'như', 'thế', 'này', 
+      'và', 'là', 'có', 'không', 'giúp', 'với', 'về', 'từ', 'ở', 'trên', 'dưới', 'theo', 'để', 'vô', 
+      'đến', 'một', 'nhiều', 'ít', 'hay', 'đã', 'đang', 'sẽ', 'nữa', 'của', 'cho', 'nên', 'nào', 'tốt', 'nhất'
+    ]);
+
+    return normalized
+      .split(' ')
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0)
+      .filter((token) => !stopWords.has(token));
   }
 
   async searchProductsByEmbedding(queryEmbedding: number[], limit: number): Promise<ProductResponse[]> {
@@ -669,7 +927,7 @@ export class ProductService {
           score: cosineSimilarity(queryEmbedding, embedding),
         };
       })
-      .filter((item): item is { product: Product; score: number } => !!item && item.score > 0)
+      .filter((item): item is { product: Product; score: number } => !!item && item.score >= 0.5)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
 
@@ -737,72 +995,6 @@ export class ProductService {
 
   private escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  private extractSearchTokens(input: string): string[] {
-    const normalized = input
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (!normalized) {
-      return [];
-    }
-
-    const stopWords = new Set([
-      'tôi',
-      'tìm',
-      'muốn',
-      'cần',
-      'các',
-      'cái',
-      'những',
-      'sản',
-      'phẩm',
-      'loại',
-      'như',
-      'thế',
-      'này',
-      'và',
-      'là',
-      'có',
-      'không',
-      'giúp',
-      'với',
-      'về',
-      'từ',
-      'ở',
-      'trên',
-      'dưới',
-      'theo',
-      'để',
-      'vô',
-      'đến',
-      'một',
-      'nhiều',
-      'ít',
-      'hay',
-      'đã',
-      'đang',
-      'sẽ',
-      'nữa',
-    ]);
-
-    return normalized
-      .split(' ')
-      .map((token) => token.trim())
-      .filter((token) => token.length >= 2)
-      .filter((token) => !stopWords.has(token));
-  }
-
-  private buildTokenMatch(tokens: string[]): Array<Record<string, unknown>> {
-    return tokens.map((token) => {
-      const regex = new RegExp(this.escapeRegex(token), 'i');
-      return {
-        $or: [{ name: regex }, { slug: regex }, { description: regex }],
-      };
-    });
   }
 
   private scoreRecommendation(

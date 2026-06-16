@@ -52,6 +52,7 @@ const getObjectIdString = (value: unknown): string | undefined => {
 const buildEmbedding = async (
   product: Product,
   subCategoryContextById: Map<string, SubCategoryContext>,
+  brandNameById: Map<string, string>,
 ): Promise<number[]> => {
   const parts: string[] = [];
 
@@ -61,6 +62,14 @@ const buildEmbedding = async (
 
   if (product.description) {
     parts.push(`Mô tả: ${product.description}`);
+  }
+
+  const brandId = getObjectIdString(product.brand);
+  if (brandId) {
+    const brandName = brandNameById.get(brandId);
+    if (brandName) {
+      parts.push(`Thương hiệu: ${brandName}`);
+    }
   }
 
   const subCategoryId = getObjectIdString(product.subcategories);
@@ -137,11 +146,8 @@ const backfillEmbeddings = async (): Promise<void> => {
     scanned += products.length;
 
     for (const product of products) {
-      if (Array.isArray(product.embedding) && product.embedding.length > 0) {
-        continue;
-      }
-
-      const embedding = await buildEmbedding(product, subCategoryContextById);
+      // Force regeneration by removing the previous continue check
+      const embedding = await buildEmbedding(product, subCategoryContextById, brandNameById);
       if (!embedding.length) {
         continue;
       }

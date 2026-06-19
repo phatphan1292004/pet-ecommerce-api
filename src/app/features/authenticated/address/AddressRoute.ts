@@ -33,6 +33,21 @@ router.post('/addresses', async (req: Request, res: Response, next: NextFunction
   }
 });
 
+router.put('/addresses/:addressId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const addressId = req.params.addressId as string;
+    const payload: Partial<CreateAddressData> = req.body;
+    const address = await addressService.updateAddress(addressId, payload);
+
+    res.status(200).json({
+      message: 'Address updated successfully',
+      data: address
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.delete('/addresses/:addressId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const addressId = req.params.addressId as string;

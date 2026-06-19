@@ -1,7 +1,7 @@
 import { AppDataSource } from '@/app/database';
 import { Cart } from '@/app/entities/Cart';
 import { Order } from '@/app/entities/Order';
-import { BadRequestError, NotFoundError } from '@/app/exceptions/AppError';
+import { BadRequestError, NotFoundError, ForbiddenError } from '@/app/exceptions/AppError';
 import { ObjectId } from 'mongodb';
 import { getIo } from '../../../socket';
 
@@ -330,5 +330,189 @@ export class OrderService {
     } catch {
       return null;
     }
+  }
+
+  async getOrderById(orderId: string): Promise<OrderListItem | null> {
+    const objectId = this.toObjectId(orderId);
+    if (!objectId) {
+      throw new BadRequestError('orderId is invalid');
+    }
+
+    const order = await this.orderRepo.findOne({
+      where: { _id: objectId },
+    });
+
+    if (!order) {
+      return null;
+    }
+
+    const cartObjectId = this.toObjectId(order.cartId);
+    const cart = cartObjectId
+      ? await this.cartRepo.findOne({
+          where: { _id: cartObjectId },
+        })
+      : null;
+
+    return {
+      id: order._id.toHexString(),
+      customerId: order.customerId,
+      cartId: order.cartId,
+      status: order.status,
+      paymentMethod: order.paymentMethod,
+      isPaid: order.isPaid ?? false,
+      arrivalName: order.arrivalName,
+      arrivalPhone: order.arrivalPhone,
+      arrivalAddress: order.arrivalAddress,
+      arrivalTime: order.arrivalTime,
+      note: order.note,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      cart: cart
+        ? {
+            id: cart._id.toHexString(),
+            status: cart.status,
+            totalPrice: cart.totalPrice,
+            totalDiscount: cart.totalDiscount,
+            finalPrice: cart.finalPrice,
+            products: cart.products,
+            createdAt: cart.createdAt,
+            updatedAt: cart.updatedAt,
+          }
+        : null,
+    };
+  }
+
+  async updateOrderDeliveryInfo(
+    orderId: string,
+    customerId: string,
+    payload: { arrivalName: string; arrivalPhone: string; arrivalAddress: string }
+  ): Promise<OrderListItem> {
+    const objectId = this.toObjectId(orderId);
+    if (!objectId) {
+      throw new BadRequestError('orderId is invalid');
+    }
+
+    const order = await this.orderRepo.findOne({
+      where: { _id: objectId },
+    });
+
+    if (!order) {
+      throw new NotFoundError('Order not found');
+    }
+
+    if (order.customerId !== customerId) {
+      throw new ForbiddenError('You are not authorized to update this order');
+    }
+
+    if (order.status !== 'pending') {
+      throw new BadRequestError('Only pending orders can be updated');
+    }
+
+    order.arrivalName = payload.arrivalName.trim();
+    order.arrivalPhone = payload.arrivalPhone.trim();
+    order.arrivalAddress = payload.arrivalAddress.trim();
+
+    const savedOrder = await this.orderRepo.save(order);
+
+    const cartObjectId = this.toObjectId(savedOrder.cartId);
+    const cart = cartObjectId
+      ? await this.cartRepo.findOne({
+          where: { _id: cartObjectId },
+        })
+      : null;
+
+    return {
+      id: savedOrder._id.toHexString(),
+      customerId: savedOrder.customerId,
+      cartId: savedOrder.cartId,
+      status: savedOrder.status,
+      paymentMethod: savedOrder.paymentMethod,
+      isPaid: savedOrder.isPaid ?? false,
+      arrivalName: savedOrder.arrivalName,
+      arrivalPhone: savedOrder.arrivalPhone,
+      arrivalAddress: savedOrder.arrivalAddress,
+      arrivalTime: savedOrder.arrivalTime,
+      note: savedOrder.note,
+      createdAt: savedOrder.createdAt,
+      updatedAt: savedOrder.updatedAt,
+      cart: cart
+        ? {
+            id: cart._id.toHexString(),
+            status: cart.status,
+            totalPrice: cart.totalPrice,
+            totalDiscount: cart.totalDiscount,
+            finalPrice: cart.finalPrice,
+            products: cart.products,
+            createdAt: cart.createdAt,
+            updatedAt: cart.updatedAt,
+          }
+        : null,
+    };
+  }
+
+  async updateOrderStatus(
+    orderId: string,
+    customerId: string,
+    status: string
+  ): Promise<OrderListItem> {
+    const objectId = this.toObjectId(orderId);
+    if (!objectId) {
+      throw new BadRequestError('orderId is invalid');
+    }
+
+    const order = await this.orderRepo.findOne({
+      where: { _id: objectId },
+    });
+
+    if (!order) {
+      throw new NotFoundError('Order not found');
+    }
+
+    if (order.customerId !== customerId) {
+      throw new ForbiddenError('You are not authorized to update this order');
+    }
+
+    if (status === 'cancelled' && order.status !== 'pending') {
+      throw new BadRequestError('Only pending orders can be cancelled');
+    }
+
+    order.status = status;
+
+    const savedOrder = await this.orderRepo.save(order);
+
+    const cartObjectId = this.toObjectId(savedOrder.cartId);
+    const cart = cartObjectId
+      ? await this.cartRepo.findOne({
+          where: { _id: cartObjectId },
+        })
+      : null;
+
+    return {
+      id: savedOrder._id.toHexString(),
+      customerId: savedOrder.customerId,
+      cartId: savedOrder.cartId,
+      status: savedOrder.status,
+      paymentMethod: savedOrder.paymentMethod,
+      isPaid: savedOrder.isPaid ?? false,
+      arrivalName: savedOrder.arrivalName,
+      arrivalPhone: savedOrder.arrivalPhone,
+      arrivalAddress: savedOrder.arrivalAddress,
+      arrivalTime: savedOrder.arrivalTime,
+      note: savedOrder.note,
+      createdAt: savedOrder.createdAt,
+      updatedAt: savedOrder.updatedAt,
+      cart: cart
+        ? {
+            id: cart._id.toHexString(),
+            status: cart.status,
+            totalPrice: cart.totalPrice,
+            totalDiscount: cart.totalDiscount,
+            finalPrice: cart.finalPrice,
+            products: cart.products,
+            createdAt: cart.createdAt,
+            updatedAt: cart.updatedAt,
+          }
+        : null,
+    };
   }
 }

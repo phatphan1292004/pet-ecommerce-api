@@ -101,6 +101,91 @@ export class AddressService {
     }
   }
 
+  async updateAddress(addressId: string, payload: Partial<CreateAddressData>): Promise<Address> {
+    if (!addressId || addressId.trim().length === 0) {
+      throw new BadRequestError('addressId is required');
+    }
+
+    if (!ObjectId.isValid(addressId)) {
+      throw new NotFoundError('Invalid address id');
+    }
+
+    const oid = new ObjectId(addressId.trim());
+    const address = await this.addressRepo.findOne({ where: { _id: oid } });
+
+    if (!address) {
+      throw new NotFoundError('Address not found');
+    }
+
+    if (payload.firebaseUid && address.firebaseUid !== payload.firebaseUid) {
+      throw new BadRequestError('Not allowed to update this address');
+    }
+
+    if (payload.fullName !== undefined) {
+      if (!payload.fullName.trim()) throw new BadRequestError('fullName is required');
+      address.fullName = payload.fullName.trim();
+    }
+
+    if (payload.phone !== undefined) {
+      if (!payload.phone.trim()) throw new BadRequestError('phone is required');
+      address.phone = payload.phone.trim();
+    }
+
+    if (payload.email !== undefined) {
+      address.email = payload.email?.trim();
+    }
+
+    if (payload.address !== undefined) {
+      if (!payload.address.trim()) throw new BadRequestError('address is required');
+      address.address = payload.address.trim();
+    }
+
+    if (payload.province !== undefined) {
+      if (!payload.province.trim()) throw new BadRequestError('province is required');
+      address.province = payload.province.trim();
+    }
+
+    if (payload.ward !== undefined) {
+      if (!payload.ward.trim()) throw new BadRequestError('ward is required');
+      address.ward = payload.ward.trim();
+    }
+
+    if (payload.type !== undefined) {
+      if (!payload.type.trim()) throw new BadRequestError('type is required');
+      address.type = payload.type.trim();
+    }
+
+    if (payload.isDefault !== undefined) {
+      const wasDefault = address.isDefault;
+      const shouldSetDefault = payload.isDefault === true;
+
+      if (shouldSetDefault && !wasDefault) {
+        await this.addressRepo.updateMany(
+          { firebaseUid: address.firebaseUid },
+          { $set: { isDefault: false } }
+        );
+        address.isDefault = true;
+      } else if (!shouldSetDefault && wasDefault) {
+        address.isDefault = false;
+        const otherAddresses = await this.addressRepo.find({
+          where: { firebaseUid: address.firebaseUid, _id: { $ne: oid } as any },
+          order: { createdAt: 'DESC' }
+        });
+        const next = otherAddresses[0];
+        if (next) {
+          await this.addressRepo.updateOne(
+            { _id: next._id },
+            { $set: { isDefault: true } }
+          );
+        } else {
+          address.isDefault = true;
+        }
+      }
+    }
+
+    return this.addressRepo.save(address);
+  }
+
   async createAddress(payload: CreateAddressData): Promise<Address> {
     this.validateCreatePayload(payload);
 

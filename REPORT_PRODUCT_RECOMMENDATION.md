@@ -1,77 +1,18 @@
-# Báo cáo chuẩn bị Video: Hệ thống Gợi ý Sản phẩm (Product Recommendation)
+# Báo cáo Video: Hệ thống Gợi ý Sản phẩm (Product Recommendation)
 
-Tài liệu rút gọn chuẩn bị nhanh cho video thuyết trình phần **Gợi ý sản phẩm** trong dự án Pet E-commerce.
-
----
-
-## 1. Định nghĩa ngắn gọn
-
-*   **Hệ thống gợi ý sản phẩm:** Sử dụng thuật toán **Hybrid Content-Based Vector Search** (Tìm kiếm vector lai dựa trên nội dung).
-*   **Cơ chế hoạt động:**
-    1.  **Theo vết hành vi (User Activity):** Lưu lại hành động `view` (xem, trọng số = 1) và `click` (nhấp vào xem chi tiết, trọng số = 2) của người dùng.
-    2.  **Hồ sơ sở thích khách hàng (Customer Profile Vector):** Tính trung bình động có trọng số của các vector sản phẩm đã tương tác để tạo thành Vector sở thích cá nhân (`customer.profileEmbedding`).
-    3.  **Công thức chấm điểm đề xuất lai (Hybrid Scoring):**
-        $$\text{Điểm đề xuất} = \text{CosineSimilarity} \times (1 + \text{Bonus})$$
-        *   *Bonus trùng danh mục phụ (subcategory):* +15%
-        *   *Bonus trùng nhãn gắn (tags):* +3% mỗi thẻ trùng (tối đa 25%)
-        *   *Bonus trùng loài (chó/mèo):* +8%
+Tài liệu chi tiết chuẩn bị cho video thuyết trình phần **Gợi ý sản phẩm cá nhân hóa**.
 
 ---
 
-## 2. Luồng hoạt động (Workflow)
+## 1. Định nghĩa & Điểm mạnh công nghệ
 
-```
-[Khách hàng xem/click/mua sản phẩm] ──► [Lưu hoạt động (trọng số 1 hoặc 2 hoặc 4)]
-                                             │
-                                             ▼
-[Tính trung bình vector & chuẩn hóa] ──► [Cập nhật Hồ sơ sở thích người dùng]
-                                             │
-                                             ▼
-[Tính Cosine Similarity + Điểm thưởng Bonus] ──► [Gợi ý top sản phẩm phù hợp nhất]
-```
+### A. Định nghĩa về Vector Embedding (Nhúng Vector)
+*   **Vector Embedding (Nhúng Vector):** Là một kỹ thuật biểu diễn các thực thể dữ liệu phi cấu trúc phức tạp (như thông tin chi tiết một sản phẩm bao gồm tên, mô tả, danh mục, thương hiệu) thành một chuỗi các con số (gọi là vector số thực) có số chiều cố định (ở đây là **768 chiều**).
+*   **Nguyên lý hoạt động:** Mô hình học sâu (Deep Learning) sẽ ánh xạ ngữ nghĩa của sản phẩm lên không gian đa chiều. Các sản phẩm có thuộc tính, công dụng tương tự nhau (ví dụ: *"Hạt khô cho chó con"* và *"Thức ăn hạt dinh dưỡng cho cún cưng"*) sẽ có tọa độ vector nằm gần nhau trong không gian này.
+*   **Cosine Similarity (Độ tương đồng Cosine):** Công thức toán học dùng để tính góc giữa hai vector trong không gian đa chiều, cho ra kết quả từ 0 đến 1. Chỉ số này càng gần 1, hai sản phẩm càng giống nhau về mặt ngữ nghĩa và công dụng.
+*   **Customer Profile Embedding (Vector sở thích khách hàng):** Là vector đại diện cho xu hướng mua sắm của khách. Nó được tính bằng trung bình cộng (có trọng số tùy thuộc hành vi view=1 hay click=2) của các vector sản phẩm mà khách hàng đã tương tác, sau đó được chuẩn hóa L2 về độ dài bằng 1 để làm chuẩn so khớp.
 
----
-
-## 3. Mã nguồn cốt lõi ([ProductService.ts](file:///d:/Nam4/pet-ecommerce-api/src/app/features/guest/product/ProductService.ts))
-
-### A. Cập nhật Profile Embedding theo hành vi
-```typescript
-// Tính trung bình động có trọng số khi người dùng tương tác sản phẩm mới
-for (let i = 0; i < nextLength; i += 1) {
-  const currentValue = existingEmbedding[i] ?? 0;
-  const incomingValue = embedding[i] ?? 0;
-  combined[i] = ((currentValue * existingWeight) + (incomingValue * normalizedWeight)) / totalWeight;
-}
-customer.profileEmbedding = this.normalizeVector(combined); // Chuẩn hóa về độ dài 1
-```
-
-### B. Thuật toán chấm điểm lai kết hợp luật nghiệp vụ
-```typescript
-private scoreRecommendation(candidate, embedding, tags, subcategoryIds, species): number {
-  // 1. Tính toán độ tương đồng Cosine cơ bản
-  const baseScore = cosineSimilarity(embedding, candidate.embedding ?? []);
-  if (baseScore <= 0) return 0;
-
-  let bonus = 0;
-  // 2. Cộng điểm thưởng theo các điều kiện nghiệp vụ
-  if (trùngSubcategory) bonus += 0.15;
-  if (trùngTags) bonus += Math.min(0.25, tagHits * 0.03);
-  if (trùngLoàiThúCưng) bonus += 0.08;
-
-  // 3. Nhân hệ số điểm thưởng
-  return baseScore * (1 + bonus);
-}
-```
-
----
-
-## 4. Kịch bản thuyết trình nhanh (1.5 phút)
-
-1.  **Giới thiệu (15s):**
-    *   *"Em xin báo cáo về phần Gợi ý sản phẩm thông minh. Hệ thống tự động cá nhân hóa sản phẩm dựa trên thuật toán so khớp vector và luật nghiệp vụ thực tế."*
-2.  **Cơ chế hoạt động (30s):**
-    *   *"Mỗi khi người dùng xem hoặc nhấp vào sản phẩm, hệ thống lưu hoạt động theo trọng số 1 hoặc 2 và cập nhật vector sở thích của khách hàng. Khi gợi ý, hệ thống tính độ tương đồng Cosine giữa vector sở thích này với các sản phẩm ứng viên, rồi cộng điểm thưởng bonus cho sản phẩm cùng danh mục, cùng tag hoặc cùng loài thú cưng."*
-3.  **Demo thực tế (45s):**
-    *   *Thao tác:* Vào tài khoản mới $\rightarrow$ phần gợi ý hiển thị sản phẩm mặc định. Bấm xem 2-3 gói hạt/pate cho mèo $\rightarrow$ F5 lại trang chủ $\rightarrow$ Chỉ ra danh sách gợi ý đã tự động chuyển đổi sang các loại hạt/pate cho mèo con.
-4.  **Chỉ code cốt lõi (30s):**
-    *   Mở file [ProductService.ts](file:///d:/Nam4/pet-ecommerce-api/src/app/features/guest/product/ProductService.ts). Giải thích nhanh cách cộng dồn vector sở thích và hàm chấm điểm `scoreRecommendation` với công thức `CosineSimilarity * (1 + Bonus)`.
+### B. Điểm mạnh công nghệ
+*   **Cá nhân hóa theo thời gian thực:** Nhờ thuật toán trung bình động có trọng số, hồ sơ sở thích (`profileEmbedding`) của khách hàng được cập nhật liên tục ngay khi họ có hành vi tương tác mới, giúp hệ thống lập tức phản hồi và thay đổi sản phẩm gợi ý phù hợp nhất.
+*   **Độ chính xác cao nhờ thuật toán lai (Hybrid Scoring):** Sự kết hợp hoàn hảo giữa so khớp ngữ nghĩa vector AI và quy tắc kinh doanh thực tế (cộng điểm thưởng +15% trùng danh mục phụ, +8% trùng loài thú cưng và tối đa +25% trùng tag) giúp tránh các gợi ý phi lý (như gợi ý đồ ăn mèo cho người nuôi chó).
+*   **Tối ưu hiệu năng tìm kiếm:** Chỉ thực hiện so khớp trên 400 sản phẩm ứng viên tiềm năng (đã lọc bớt các loài thú cưng không khớp hoặc sản phẩm đã xem) để giảm thiểu chi phí tính toán Cosine Similarity trên CPU.

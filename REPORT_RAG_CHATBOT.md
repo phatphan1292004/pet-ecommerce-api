@@ -1,75 +1,17 @@
-# Báo cáo chuẩn bị Video: Trợ lý ảo RAG Chatbot
+# Báo cáo Video: Trợ lý ảo RAG Chatbot
 
-Tài liệu rút gọn chuẩn bị nhanh cho video thuyết trình phần **RAG Chatbot** trong dự án Pet E-commerce.
-
----
-
-## 1. Định nghĩa ngắn gọn
-
-*   **RAG (Retrieval-Augmented Generation):** Kỹ thuật kết hợp **Truy xuất dữ liệu (Retrieval)** từ cơ sở dữ liệu nội bộ và **Mô hình ngôn ngữ lớn (Generation - Google Gemini)** để trả lời câu hỏi.
-*   **Tại sao cần?**
-    *   Tránh **ảo tưởng thông tin (hallucination)** của AI về những quy định riêng của shop.
-    *   Cung cấp câu trả lời thực tế (phí ship, chính sách đổi trả) kèm thẻ sản phẩm mua được ngay.
-    *   Cập nhật dữ liệu thời gian thực mà không cần huấn luyện lại mô hình AI.
+Tài liệu chi tiết chuẩn bị cho video thuyết trình phần **Trợ lý ảo RAG Chatbot** kết hợp cơ sở tri thức nội bộ và mô hình Google Gemini.
 
 ---
 
-## 2. Luồng hoạt động (Workflow)
-
-```
-[Khách hỏi] ──► [Sinh Vector bằng Gemini Embedding]
-                       │
-                       ├─► [Vector Search DB] ──► Lấy bài viết chính sách
-                       ├─► [Keyword Search DB] ──► Lấy sản phẩm liên quan
-                       │
-                       ▼
-[Ghép vào Prompt cấu trúc nghiêm ngặt] ──► [Gửi Google Gemini LLM]
-                                               │
-                                               ▼
-[Trả về UI] ◄── [Text câu trả lời + Thẻ card sản phẩm + Nguồn tham chiếu]
-```
-
----
-
-## 3. Mã nguồn cốt lõi
-
-### A. Hàm điều phối chính ([ChatRagService.ts](file:///d:/Nam4/pet-ecommerce-api/src/app/features/authenticated/chat/ChatRagService.ts))
-```typescript
-async askQuestion(payload: RagQuestionPayload): Promise<RagAnswerResponse> {
-  // 1. Lấy vector của câu hỏi người dùng
-  const queryEmbedding = await getGoogleAiStudioEmbedding(question);
-
-  // 2. Truy xuất song song Tri thức và Sản phẩm liên quan
-  const [kbResults, productResults] = await Promise.all([
-    this.searchKnowledgeBase(queryEmbedding, kbLimit), // Tìm bằng Vector Search
-    this.getProductSuggestions(question, queryEmbedding, productLimit) // Tìm bằng Keyword / Vector Search
-  ]);
-
-  // 3. Ghép Prompt và gọi Gemini sinh câu trả lời
-  const prompt = this.buildPrompt(question, kbResults, productResults);
-  const answer = await generateGeminiResponse(prompt);
-
-  return { answer, sources: kbResults, products: productResults };
-}
-```
-
-### B. Luật Prompt nghiêm ngặt ([ChatPrompt.ts](file:///d:/Nam4/pet-ecommerce-api/src/app/features/authenticated/chat/ChatPrompt.ts))
-Phân chia các kịch bản phản hồi để tối ưu giao diện:
-*   **Trường hợp 1 (Có sản phẩm):**
-    *   *Khách hỏi cụ thể sản phẩm:* AI chỉ trả về duy nhất câu: `"Hiện tại cửa hàng của chúng tôi đang có những mặt hàng sau."` (Cấm liệt kê tên/giá bằng chữ vì UI React sẽ tự vẽ thẻ sản phẩm riêng ở dưới).
-    *   *Khách cần tư vấn triệu chứng:* Đưa ra lời khuyên ngắn, kèm câu dẫn giới thiệu sản phẩm bên dưới.
-*   **Trường hợp 2 (Chỉ có tri thức chính sách):** Trả lời chính xác dựa theo tài liệu tri thức, không bịa đặt.
-*   **Trường hợp 3 (Thiếu thông tin):** Trả lời bằng mẫu câu chăm sóc khách hàng lịch sự để hướng dẫn liên hệ hotline.
-
----
-
-## 4. Kịch bản thuyết trình nhanh (1.5 phút)
-
-1.  **Giới thiệu (15s):**
-    *   *"Em xin báo cáo về phần trợ lý ảo thông minh RAG Chatbot. Hệ thống giúp chatbot trả lời chính xác thông tin nội bộ của shop và gợi ý sản phẩm ngay trong khung chat."*
-2.  **Cơ chế hoạt động (30s):**
-    *   *"Khi khách hàng hỏi, hệ thống tạo vector câu hỏi để truy xuất các bài viết chính sách bằng Vector Search trên MongoDB, kết hợp tìm kiếm sản phẩm. Toàn bộ thông tin này được làm ngữ cảnh đưa vào Prompt để Gemini trả lời chính xác, tránh ảo tưởng."*
-3.  **Demo thực tế (45s):**
-    *   *Thao tác:* Nhập câu hỏi chính sách: *"Shop giao hàng thế nào, bao lâu nhận được?"* $\rightarrow$ chatbot trả lời chính xác theo tài liệu tri thức. Nhập câu hỏi tư vấn: *"Mèo rụng lông dùng gì?"* $\rightarrow$ chatbot đưa ra lời khuyên và tự hiển thị danh sách thẻ sản phẩm sữa tắm mèo rụng lông ngay phía dưới.
-4.  **Chỉ code cốt lõi (30s):**
-    *   Mở file [ChatRagService.ts](file:///d:/Nam4/pet-ecommerce-api/src/app/features/authenticated/chat/ChatRagService.ts). Giải thích bước tạo embedding, truy xuất song song `Promise.all` và gửi prompt lên Gemini. Chỉ ra các luật phân loại phản hồi nghiêm ngặt trong [ChatPrompt.ts](file:///d:/Nam4/pet-ecommerce-api/src/app/features/authenticated/chat/ChatPrompt.ts).
+## 1. Định nghĩa & Phương pháp RAG
+*   **RAG (Retrieval-Augmented Generation - Tạo lập tăng cường truy xuất):** Kỹ thuật tối ưu hóa câu trả lời của mô hình ngôn ngữ lớn (LLM - Google Gemini) bằng cách ép nó tham chiếu thông tin từ một cơ sở tri thức bên ngoài đáng tin cậy trước khi tạo ra câu trả lời cho khách hàng.
+    *   *Giai đoạn 1: Truy xuất (Retrieval):* Khi khách hỏi, hệ thống chuyển câu hỏi thành Vector Embedding và thực hiện tìm kiếm tương đồng trên cơ sở tri thức MongoDB để lấy ra tài liệu liên quan nhất.
+    *   *Giai đoạn 2: Tạo câu trả lời (Generation):* Hệ thống kết hợp câu hỏi ban đầu và nội dung tài liệu vừa tìm được thành một Prompt ngữ cảnh đầy đủ, gửi lên Google Gemini để sinh câu trả lời chính xác và tự nhiên.
+*   **Khái niệm Vector Embedding & Vector Search (Thành phần cốt lõi của RAG):**
+    *   *Vector Embedding là gì?* Là quá trình chuyển đổi câu chữ phi cấu trúc (ví dụ: câu hỏi *"Mèo rụng lông thì tắm bằng gì?"*) thành một chuỗi các con số thực (vector) có số chiều cố định (ở đây là **768 chiều**). Chuỗi số này đại diện cho "tọa độ ý nghĩa ngữ nghĩa" của câu văn trong không gian toán học đa chiều. Hai câu văn có từ ngữ khác nhau nhưng cùng ý nghĩa (ví dụ: *"phí ship bao nhiêu"* và *"phí giao hàng thế nào"*) sẽ có các vector nằm rất gần nhau.
+    *   *Ứng dụng trong tìm kiếm:* Hệ thống tính toán độ gần nhau giữa vector câu hỏi và vector tài liệu tri thức bằng công thức tương đồng Cosine (Cosine Similarity). Nhờ đó, chatbot có thể hiểu được ý định thực sự của khách hàng mà không bị phụ thuộc vào việc trùng khớp từ khóa chính xác từng ký tự (Keyword Matching).
+*   **Điểm mạnh:**
+    *   Tránh **ảo tưởng thông tin (hallucination)** của AI về những quy định riêng của shop: Bằng cách giới hạn phạm vi trả lời của Gemini chỉ được dựa trên [KNOWLEDGE BASE CONTEXT] được cung cấp. Nếu dữ liệu thiếu, AI sẽ dùng mẫu câu chăm sóc khách hàng lịch sự thay vì tự bịa ra thông tin sai lệch về shop.
+    *   Cung cấp câu trả lời thực tế (phí ship, chính sách đổi trả) kèm thẻ sản phẩm mua được ngay: Hệ thống thực hiện truy xuất song song thông tin chính sách và danh sách sản phẩm liên quan. React Frontend sẽ bắt lấy dữ liệu này để tự động kết xuất thành các thẻ card sản phẩm trực quan sinh động bên dưới câu trả lời văn bản của AI.
+    *   Cập nhật dữ liệu thời gian thực mà không cần huấn luyện lại mô hình AI: Khi cửa hàng thay đổi chính sách giao hàng hoặc có thêm sản phẩm mới, nhân viên chỉ cần cập nhật dữ liệu và sinh vector embedding lưu vào MongoDB. Chatbot sẽ lập tức truy xuất được thông tin mới mà không tốn chi phí huấn luyện lại (re-train) mô hình AI.

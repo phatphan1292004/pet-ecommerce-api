@@ -269,3 +269,6 @@ export const verifyIPN = (req: Request): VerifyPaymentResponse => {
     orderId: vnp_Params['vnp_TxnRef'],
   };
 };
+
+// Auto-trigger env reload
+
